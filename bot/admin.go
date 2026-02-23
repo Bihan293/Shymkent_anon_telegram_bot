@@ -63,13 +63,16 @@ func HandleInfo(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	data := callback.Data
 
-	// ── User confirm/cancel ────────────────────────────────────────────
+	// ── User confirm/cancel / subscription check ──────────────────────
 	switch data {
 	case "confirm_send":
 		handleConfirmSend(bot, callback)
 		return
 	case "cancel_send":
 		handleCancelSend(bot, callback)
+		return
+	case "check_subscription":
+		handleCheckSubscription(bot, callback)
 		return
 	}
 
@@ -213,4 +216,29 @@ func parseAnonNumber(data string) int {
 		return 0
 	}
 	return n
+}
+
+func handleCheckSubscription(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	userID := callback.From.ID
+	chatID := callback.Message.Chat.ID
+
+	if IsSubscribed(bot, userID) {
+		// Delete subscription message
+		del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+		bot.Request(del)
+
+		// Send welcome message with user keyboard
+		text := "Анонимные сообщения администратору.\nОсновной канал: https://t.me/shymkent_anon"
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ReplyMarkup = UserKeyboard()
+		bot.Send(msg)
+
+		setState(userID, StateIdle)
+
+		answer := tgbotapi.NewCallback(callback.ID, "✅ Подписка подтверждена!")
+		bot.Send(answer)
+	} else {
+		answer := tgbotapi.NewCallback(callback.ID, "❌ Вы не подписаны на канал!")
+		bot.Send(answer)
+	}
 }

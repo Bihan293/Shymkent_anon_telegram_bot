@@ -76,11 +76,48 @@ func validateDraftLimits(draft *DraftMessage) string {
 	return ""
 }
 
+// ── Subscription check ─────────────────────────────────────────────────────
+
+func IsSubscribed(bot *tgbotapi.BotAPI, userID int64) bool {
+	chatCfg := tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+			SuperGroupUsername: ChannelUsername,
+			UserID:             userID,
+		},
+	}
+
+	member, err := bot.GetChatMember(chatCfg)
+	if err != nil {
+		log.Printf("GetChatMember error for user %d: %v", userID, err)
+		return false
+	}
+
+	switch member.Status {
+	case "creator", "administrator", "member":
+		return true
+	default:
+		return false
+	}
+}
+
+func sendSubscriptionMessage(bot *tgbotapi.BotAPI, chatID int64) {
+	text := "❗ Чтобы пользоваться ботом, подпишитесь на наш официальный канал:\n\n📢 " + ChannelLink
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = SubscriptionKeyboard()
+	bot.Send(msg)
+}
+
 // ── Handlers ───────────────────────────────────────────────────────────────
 
 func HandleStart(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	setState(message.From.ID, StateIdle)
 	deleteDraft(message.From.ID)
+
+	// Check channel subscription
+	if !IsSubscribed(bot, message.From.ID) {
+		sendSubscriptionMessage(bot, message.Chat.ID)
+		return
+	}
 
 	text := "Анонимные сообщения администратору.\nОсновной канал: https://t.me/shymkent_anon"
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
@@ -90,6 +127,12 @@ func HandleStart(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	userID := message.From.ID
+
+	// Check channel subscription
+	if !IsSubscribed(bot, userID) {
+		sendSubscriptionMessage(bot, message.Chat.ID)
+		return
+	}
 
 	banned, err := IsBanned(userID)
 	if err != nil {
@@ -136,6 +179,13 @@ func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	userID := message.From.ID
 
 	if getState(userID) != StateWaitingContent {
+		return
+	}
+
+	// Check channel subscription
+	if !IsSubscribed(bot, userID) {
+		setState(userID, StateIdle)
+		sendSubscriptionMessage(bot, message.Chat.ID)
 		return
 	}
 
