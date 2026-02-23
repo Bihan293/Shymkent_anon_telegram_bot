@@ -56,3 +56,14 @@ func InfoKeyboard(anonNumber int) tgbotapi.InlineKeyboardMarkup {
 		),
 	)
 }
+
+func SubscriptionKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonURL("📢 Подписаться на канал", ChannelLink),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Проверить подписку", "check_subscription"),
+		),
+	)
+}
