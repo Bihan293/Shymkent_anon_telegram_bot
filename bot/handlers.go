@@ -11,10 +11,13 @@ import (
 
 // ── State Machine ──────────────────────────────────────────────────────────
 var (
-	userStates = make(map[int64]string)
-	userDrafts = make(map[int64]*DraftMessage)
-	mu         sync.Mutex
+	userStates   = make(map[int64]string)
+	userDrafts   = make(map[int64]*DraftMessage)
+	userCooldown = make(map[int64]time.Time) // last successful send time
+	mu           sync.Mutex
 )
+
+const cooldownDuration = 5 * time.Minute
 
 func getState(userID int64) string {
 	mu.Lock()
@@ -79,6 +82,16 @@ func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	}
 	if banned {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "⛔ Вы заблокированы.")
+		bot.Send(msg)
+		return
+	}
+
+	// Check 5-minute cooldown
+	if remaining := getCooldownRemaining(userID); remaining > 0 {
+		minutes := int(remaining.Minutes())
+		seconds := int(remaining.Seconds()) % 60
+		text := fmt.Sprintf("⏳ Подождите %d мин. %d сек. перед отправкой следующего сообщения.", minutes, seconds)
+		msg := tgbotapi.NewMessage(message.Chat.ID, text)
 		bot.Send(msg)
 		return
 	}
@@ -321,10 +334,16 @@ func handleConfirmSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	// Clean up
 	deleteDraft(userID)
 	setState(userID, StateIdle)
+	setCooldown(userID)
 
-	// Edit the preview message to show confirmation
-	edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "Отправлено ✓")
-	bot.Send(edit)
+	// Delete the preview message and send a fresh confirmation
+	// (EditMessageText fails on photo/video messages — Telegram API limitation)
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	confirmMsg := tgbotapi.NewMessage(chatID, "✅ Сообщение отправлено!")
+	confirmMsg.ReplyMarkup = UserKeyboard()
+	bot.Send(confirmMsg)
 
 	answer := tgbotapi.NewCallback(callback.ID, "Отправлено ✓")
 	bot.Send(answer)
@@ -337,11 +356,39 @@ func handleCancelSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	deleteDraft(userID)
 	setState(userID, StateIdle)
 
-	edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "Отменено ✖")
-	bot.Send(edit)
+	// Delete the preview message and send a fresh cancellation
+	// (EditMessageText fails on photo/video messages — Telegram API limitation)
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	cancelMsg := tgbotapi.NewMessage(chatID, "❌ Сообщение отменено.")
+	cancelMsg.ReplyMarkup = UserKeyboard()
+	bot.Send(cancelMsg)
 
 	answer := tgbotapi.NewCallback(callback.ID, "Отменено")
 	bot.Send(answer)
+}
+
+// ── Cooldown helpers ──────────────────────────────────────────────────────
+
+func setCooldown(userID int64) {
+	mu.Lock()
+	defer mu.Unlock()
+	userCooldown[userID] = time.Now()
+}
+
+func getCooldownRemaining(userID int64) time.Duration {
+	mu.Lock()
+	defer mu.Unlock()
+	lastSend, ok := userCooldown[userID]
+	if !ok {
+		return 0
+	}
+	elapsed := time.Since(lastSend)
+	if elapsed >= cooldownDuration {
+		return 0
+	}
+	return cooldownDuration - elapsed
 }
 
 // ── Send draft to admin ────────────────────────────────────────────────────
