@@ -3,19 +3,69 @@ package main
 import (
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Состояния пользователей: ожидание сообщения
-var waitingForMessage = make(map[int64]bool)
+// ── State Machine ──────────────────────────────────────────────────────────
+var (
+	userStates = make(map[int64]string)
+	userDrafts = make(map[int64]*DraftMessage)
+	mu         sync.Mutex
+)
+
+func getState(userID int64) string {
+	mu.Lock()
+	defer mu.Unlock()
+	s, ok := userStates[userID]
+	if !ok {
+		return StateIdle
+	}
+	return s
+}
+
+func setState(userID int64, state string) {
+	mu.Lock()
+	defer mu.Unlock()
+	userStates[userID] = state
+}
+
+func setDraft(userID int64, d *DraftMessage) {
+	mu.Lock()
+	defer mu.Unlock()
+	userDrafts[userID] = d
+}
+
+func getDraft(userID int64) *DraftMessage {
+	mu.Lock()
+	defer mu.Unlock()
+	return userDrafts[userID]
+}
+
+func deleteDraft(userID int64) {
+	mu.Lock()
+	defer mu.Unlock()
+	delete(userDrafts, userID)
+}
+
+// ── Media-group buffer ─────────────────────────────────────────────────────
+var (
+	mediaBuffer = make(map[string][]tgbotapi.Message)
+	mediaTimers = make(map[string]*time.Timer)
+	mediaMu     sync.Mutex
+)
+
+// ── Handlers ───────────────────────────────────────────────────────────────
 
 func HandleStart(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
-	text := "Анонимные сообщения администратору.\nОсновной канал: https://t.me/shymkent_anon"
+	setState(message.From.ID, StateIdle)
+	deleteDraft(message.From.ID)
 
+	text := "Анонимные сообщения администратору.\nОсновной канал: https://t.me/shymkent_anon"
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
 	msg.ReplyMarkup = UserKeyboard()
-
 	bot.Send(msg)
 }
 
@@ -38,7 +88,6 @@ func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		log.Printf("CheckLimit error: %v", err)
 		return
 	}
-
 	if count >= 3 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вы исчерпали лимит сообщений на сегодня (3/3).")
 		bot.Send(msg)
@@ -47,40 +96,218 @@ func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 	remaining := 3 - count
 	text := fmt.Sprintf("У вас осталось %d/3 сообщений сегодня.\nНапишите ваше сообщение. Можно прикрепить фото и видео.", remaining)
-
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
 	bot.Send(msg)
 
-	waitingForMessage[userID] = true
+	setState(userID, StateWaitingContent)
 }
 
+// HandleUserMessage processes incoming content when user is in WAITING_CONTENT.
 func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	userID := message.From.ID
 
-	if !waitingForMessage[userID] {
+	if getState(userID) != StateWaitingContent {
 		return
 	}
 
+	// Check ban again
 	banned, _ := IsBanned(userID)
 	if banned {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "⛔ Вы заблокированы.")
-		delete(waitingForMessage, userID)
+		setState(userID, StateIdle)
 		bot.Send(msg)
 		return
 	}
 
+	// Check limit again
 	count, _ := CheckLimit(userID)
 	if count >= 3 {
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Вы исчерпали лимит сообщений на сегодня (3/3).")
-		delete(waitingForMessage, userID)
+		setState(userID, StateIdle)
 		bot.Send(msg)
 		return
 	}
 
-	username := message.From.UserName
+	// ── Media-group (album) ────────────────────────────────────────────
+	if message.MediaGroupID != "" {
+		handleMediaGroup(bot, message)
+		return
+	}
+
+	// ── Single message (text / single photo / single video) ────────────
+	draft := &DraftMessage{}
+
+	if message.Photo != nil {
+		best := message.Photo[len(message.Photo)-1]
+		draft.PhotoIDs = append(draft.PhotoIDs, best.FileID)
+	}
+	if message.Video != nil {
+		draft.VideoIDs = append(draft.VideoIDs, message.Video.FileID)
+	}
+
+	// Caption or plain text
+	if message.Caption != "" {
+		draft.Text = message.Caption
+	} else if message.Text != "" {
+		draft.Text = message.Text
+	}
+
+	// Must have at least something
+	if draft.Text == "" && len(draft.PhotoIDs) == 0 && len(draft.VideoIDs) == 0 {
+		return
+	}
+
+	setDraft(userID, draft)
+	setState(userID, StateWaitingConfirm)
+	sendPreview(bot, message.Chat.ID, draft)
+}
+
+// ── Media-group logic ──────────────────────────────────────────────────────
+
+func handleMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	groupID := message.MediaGroupID
+	userID := message.From.ID
+	chatID := message.Chat.ID
+
+	mediaMu.Lock()
+	mediaBuffer[groupID] = append(mediaBuffer[groupID], *message)
+
+	// Reset or start the timer for this group
+	if t, ok := mediaTimers[groupID]; ok {
+		t.Stop()
+	}
+	mediaTimers[groupID] = time.AfterFunc(1*time.Second, func() {
+		mediaMu.Lock()
+		messages := mediaBuffer[groupID]
+		delete(mediaBuffer, groupID)
+		delete(mediaTimers, groupID)
+		mediaMu.Unlock()
+
+		draft := buildDraftFromAlbum(messages)
+		setDraft(userID, draft)
+		setState(userID, StateWaitingConfirm)
+		sendPreview(bot, chatID, draft)
+	})
+	mediaMu.Unlock()
+}
+
+func buildDraftFromAlbum(messages []tgbotapi.Message) *DraftMessage {
+	draft := &DraftMessage{}
+	for _, m := range messages {
+		if m.Photo != nil {
+			best := m.Photo[len(m.Photo)-1]
+			draft.PhotoIDs = append(draft.PhotoIDs, best.FileID)
+		}
+		if m.Video != nil {
+			draft.VideoIDs = append(draft.VideoIDs, m.Video.FileID)
+		}
+		// Take caption from the first message that has one
+		if draft.Text == "" && m.Caption != "" {
+			draft.Text = m.Caption
+		}
+	}
+	return draft
+}
+
+// ── Preview ────────────────────────────────────────────────────────────────
+
+func sendPreview(bot *tgbotapi.BotAPI, chatID int64, draft *DraftMessage) {
+	header := "Анон предпросмотр:"
+	keyboard := ConfirmSendKeyboard()
+
+	totalMedia := len(draft.PhotoIDs) + len(draft.VideoIDs)
+
+	// Album (multiple media)
+	if totalMedia > 1 {
+		var mediaGroup []interface{}
+		first := true
+		for _, pid := range draft.PhotoIDs {
+			item := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(pid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
+		}
+		for _, vid := range draft.VideoIDs {
+			item := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(vid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
+		}
+
+		mg := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+		bot.Send(mg)
+
+		// Send inline keyboard as a separate text message
+		btnMsg := tgbotapi.NewMessage(chatID, "Отправить это сообщение?")
+		btnMsg.ReplyMarkup = keyboard
+		bot.Send(btnMsg)
+		return
+	}
+
+	// Single photo
+	if len(draft.PhotoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		ph := tgbotapi.NewPhoto(chatID, tgbotapi.FileID(draft.PhotoIDs[0]))
+		ph.Caption = caption
+		ph.ReplyMarkup = keyboard
+		bot.Send(ph)
+		return
+	}
+
+	// Single video
+	if len(draft.VideoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		v := tgbotapi.NewVideo(chatID, tgbotapi.FileID(draft.VideoIDs[0]))
+		v.Caption = caption
+		v.ReplyMarkup = keyboard
+		bot.Send(v)
+		return
+	}
+
+	// Text only
+	text := fmt.Sprintf("%s\n\n%s", header, draft.Text)
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = keyboard
+	bot.Send(msg)
+}
+
+// ── Confirm / Cancel callbacks (called from admin.go dispatcher) ───────────
+
+func handleConfirmSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	userID := callback.From.ID
+	chatID := callback.Message.Chat.ID
+
+	draft := getDraft(userID)
+	if draft == nil || getState(userID) != StateWaitingConfirm {
+		answer := tgbotapi.NewCallback(callback.ID, "Нечего отправлять")
+		bot.Send(answer)
+		return
+	}
+
+	username := callback.From.UserName
 	anonNum, err := SaveMessage(userID, username)
 	if err != nil {
 		log.Printf("SaveMessage error: %v", err)
+		answer := tgbotapi.NewCallback(callback.ID, "Ошибка, попробуйте снова")
+		bot.Send(answer)
 		return
 	}
 
@@ -88,55 +315,111 @@ func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		log.Printf("IncreaseLimit error: %v", err)
 	}
 
-	delete(waitingForMessage, userID)
+	// Send to admin
+	sendDraftToAdmin(bot, draft, anonNum)
 
-	// Отправка подтверждения пользователю
-	confirm := tgbotapi.NewMessage(message.Chat.ID, "Отправлено ✓")
-	bot.Send(confirm)
+	// Clean up
+	deleteDraft(userID)
+	setState(userID, StateIdle)
 
-	// Пересылка контента админу
-	sendToAdmin(bot, message, anonNum)
+	// Edit the preview message to show confirmation
+	edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "Отправлено ✓")
+	bot.Send(edit)
+
+	answer := tgbotapi.NewCallback(callback.ID, "Отправлено ✓")
+	bot.Send(answer)
 }
 
-func sendToAdmin(bot *tgbotapi.BotAPI, message *tgbotapi.Message, anonNum int) {
+func handleCancelSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	userID := callback.From.ID
+	chatID := callback.Message.Chat.ID
+
+	deleteDraft(userID)
+	setState(userID, StateIdle)
+
+	edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "Отменено ✖")
+	bot.Send(edit)
+
+	answer := tgbotapi.NewCallback(callback.ID, "Отменено")
+	bot.Send(answer)
+}
+
+// ── Send draft to admin ────────────────────────────────────────────────────
+
+func sendDraftToAdmin(bot *tgbotapi.BotAPI, draft *DraftMessage, anonNum int) {
 	header := fmt.Sprintf("Анон #%d", anonNum)
 	keyboard := BanKeyboard(anonNum)
 
-	if message.Photo != nil {
-		photo := message.Photo[len(message.Photo)-1]
-		msg := tgbotapi.NewPhoto(adminID, tgbotapi.FileID(photo.FileID))
-		caption := header
-		if message.Caption != "" {
-			caption = fmt.Sprintf("%s\n\n%s", header, message.Caption)
+	totalMedia := len(draft.PhotoIDs) + len(draft.VideoIDs)
+
+	// Album
+	if totalMedia > 1 {
+		var mediaGroup []interface{}
+		first := true
+		for _, pid := range draft.PhotoIDs {
+			item := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(pid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
 		}
-		msg.Caption = caption
-		msg.ReplyMarkup = keyboard
-		bot.Send(msg)
-		return
-	}
-
-	if message.Video != nil {
-		msg := tgbotapi.NewVideo(adminID, tgbotapi.FileID(message.Video.FileID))
-		caption := header
-		if message.Caption != "" {
-			caption = fmt.Sprintf("%s\n\n%s", header, message.Caption)
+		for _, vid := range draft.VideoIDs {
+			item := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(vid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
 		}
-		msg.Caption = caption
-		msg.ReplyMarkup = keyboard
-		bot.Send(msg)
+
+		mg := tgbotapi.NewMediaGroup(adminID, mediaGroup)
+		bot.Send(mg)
+
+		// Ban keyboard as separate message
+		btnMsg := tgbotapi.NewMessage(adminID, header)
+		btnMsg.ReplyMarkup = keyboard
+		bot.Send(btnMsg)
 		return
 	}
 
-	if message.Text != "" {
-		text := fmt.Sprintf("%s\n\n%s", header, message.Text)
-		msg := tgbotapi.NewMessage(adminID, text)
-		msg.ReplyMarkup = keyboard
-		bot.Send(msg)
+	// Single photo
+	if len(draft.PhotoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		ph := tgbotapi.NewPhoto(adminID, tgbotapi.FileID(draft.PhotoIDs[0]))
+		ph.Caption = caption
+		ph.ReplyMarkup = keyboard
+		bot.Send(ph)
 		return
 	}
 
-	// Другие типы — просто текст
-	msg := tgbotapi.NewMessage(adminID, header)
+	// Single video
+	if len(draft.VideoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		v := tgbotapi.NewVideo(adminID, tgbotapi.FileID(draft.VideoIDs[0]))
+		v.Caption = caption
+		v.ReplyMarkup = keyboard
+		bot.Send(v)
+		return
+	}
+
+	// Text only
+	text := fmt.Sprintf("%s\n\n%s", header, draft.Text)
+	msg := tgbotapi.NewMessage(adminID, text)
 	msg.ReplyMarkup = keyboard
 	bot.Send(msg)
 }

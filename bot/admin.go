@@ -58,14 +58,27 @@ func HandleInfo(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	bot.Send(msg)
 }
 
+// HandleCallback is the single entry-point for ALL callback queries.
+// It routes user-facing callbacks (confirm_send / cancel_send) and admin callbacks.
 func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
-	if callback.From.ID != adminID {
-		callbackAnswer := tgbotapi.NewCallback(callback.ID, "Нет доступа")
-		bot.Send(callbackAnswer)
+	data := callback.Data
+
+	// ── User confirm/cancel ────────────────────────────────────────────
+	switch data {
+	case "confirm_send":
+		handleConfirmSend(bot, callback)
+		return
+	case "cancel_send":
+		handleCancelSend(bot, callback)
 		return
 	}
 
-	data := callback.Data
+	// ── Admin-only callbacks below ─────────────────────────────────────
+	if callback.From.ID != adminID {
+		answer := tgbotapi.NewCallback(callback.ID, "Нет доступа")
+		bot.Send(answer)
+		return
+	}
 
 	switch {
 	case strings.HasPrefix(data, "ban:"):

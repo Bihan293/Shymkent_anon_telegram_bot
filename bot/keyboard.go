@@ -14,6 +14,15 @@ func UserKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	)
 }
 
+func ConfirmSendKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить", "confirm_send"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "cancel_send"),
+		),
+	)
+}
+
 func BanKeyboard(anonNumber int) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
