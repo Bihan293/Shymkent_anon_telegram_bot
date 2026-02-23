@@ -61,6 +61,8 @@ func main() {
 	log.Printf("Webhook set: %s", webhookURL)
 
 	// HTTP обработчики
+
+	// Webhook
 	http.HandleFunc("/webhook", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusOK)
@@ -75,6 +77,12 @@ func main() {
 
 		processUpdate(bot, update)
 		w.WriteHeader(http.StatusOK)
+	})
+
+	// /alive endpoint for uptime robot
+	http.HandleFunc("/alive", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("alive"))
 	})
 
 	// Health check

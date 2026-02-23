@@ -33,7 +33,7 @@ func createTables() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS messages (
 			id SERIAL PRIMARY KEY,
-			anon_number INT NOT NULL,
+			anon_number BIGSERIAL UNIQUE,
 			user_id BIGINT NOT NULL,
 			username TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -58,25 +58,15 @@ func createTables() error {
 	return nil
 }
 
-func nextAnonNumber() (int, error) {
-	ctx := context.Background()
-	var n int
-	err := db.QueryRow(ctx, `SELECT COALESCE(MAX(anon_number), 0) + 1 FROM messages`).Scan(&n)
-	return n, err
-}
-
+// SaveMessage inserts a row and returns the auto-generated anon_number.
 func SaveMessage(userID int64, username string) (int, error) {
 	ctx := context.Background()
 
-	anonNum, err := nextAnonNumber()
-	if err != nil {
-		return 0, err
-	}
-
-	_, err = db.Exec(ctx,
-		`INSERT INTO messages (anon_number, user_id, username) VALUES ($1, $2, $3)`,
-		anonNum, userID, username,
-	)
+	var anonNum int
+	err := db.QueryRow(ctx,
+		`INSERT INTO messages (user_id, username) VALUES ($1, $2) RETURNING anon_number`,
+		userID, username,
+	).Scan(&anonNum)
 	if err != nil {
 		return 0, err
 	}
