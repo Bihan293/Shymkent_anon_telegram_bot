@@ -9,6 +9,13 @@ const (
 	StateWaitingConfirm = "WAITING_CONFIRM"
 )
 
+// Message content limits
+const (
+	MaxPhotos     = 8
+	MaxVideos     = 3
+	MaxTextLength = 2000
+)
+
 type Message struct {
 	ID         int
 	AnonNumber int

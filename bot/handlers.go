@@ -60,6 +60,22 @@ var (
 	mediaMu     sync.Mutex
 )
 
+// ── Validation helpers ─────────────────────────────────────────────────────
+
+func validateDraftLimits(draft *DraftMessage) string {
+	if len(draft.PhotoIDs) > MaxPhotos {
+		return fmt.Sprintf("⚠️ Слишком много фото. Максимум: %d. Вы отправили: %d.", MaxPhotos, len(draft.PhotoIDs))
+	}
+	if len(draft.VideoIDs) > MaxVideos {
+		return fmt.Sprintf("⚠️ Слишком много видео. Максимум: %d. Вы отправили: %d.", MaxVideos, len(draft.VideoIDs))
+	}
+	textLen := len([]rune(draft.Text))
+	if textLen > MaxTextLength {
+		return fmt.Sprintf("⚠️ Слишком длинный текст. Максимум: %d символов. У вас: %d.", MaxTextLength, textLen)
+	}
+	return ""
+}
+
 // ── Handlers ───────────────────────────────────────────────────────────────
 
 func HandleStart(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
@@ -170,6 +186,13 @@ func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		return
 	}
 
+	// Validate content limits
+	if errMsg := validateDraftLimits(draft); errMsg != "" {
+		msg := tgbotapi.NewMessage(message.Chat.ID, errMsg)
+		bot.Send(msg)
+		return
+	}
+
 	setDraft(userID, draft)
 	setState(userID, StateWaitingConfirm)
 	sendPreview(bot, message.Chat.ID, draft)
@@ -197,6 +220,14 @@ func handleMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		mediaMu.Unlock()
 
 		draft := buildDraftFromAlbum(messages)
+
+		// Validate content limits
+		if errMsg := validateDraftLimits(draft); errMsg != "" {
+			msg := tgbotapi.NewMessage(chatID, errMsg)
+			bot.Send(msg)
+			return
+		}
+
 		setDraft(userID, draft)
 		setState(userID, StateWaitingConfirm)
 		sendPreview(bot, chatID, draft)
