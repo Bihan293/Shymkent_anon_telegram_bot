@@ -101,17 +101,16 @@ func handleBanRequest(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	text := fmt.Sprintf("Забанить автора сообщения #%d?", anonNum)
-	edit := tgbotapi.NewEditMessageText(
+	// Only update the keyboard — never touch message text/caption/media
+	keyboard := ConfirmBanKeyboard(anonNum)
+	editMarkup := tgbotapi.NewEditMessageReplyMarkup(
 		callback.Message.Chat.ID,
 		callback.Message.MessageID,
-		text,
+		keyboard,
 	)
-	keyboard := ConfirmBanKeyboard(anonNum)
-	edit.ReplyMarkup = &keyboard
-	bot.Send(edit)
+	bot.Send(editMarkup)
 
-	answer := tgbotapi.NewCallback(callback.ID, "")
+	answer := tgbotapi.NewCallback(callback.ID, fmt.Sprintf("Забанить автора #%d?", anonNum))
 	bot.Send(answer)
 }
 
@@ -135,17 +134,20 @@ func handleConfirmBan(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	text := fmt.Sprintf("🔒 Пользователь забанен (Анон #%d)", anonNum)
-	edit := tgbotapi.NewEditMessageText(
+	// Only update the keyboard — never touch message text/caption/media
+	keyboard := UnbanKeyboard(anonNum)
+	editMarkup := tgbotapi.NewEditMessageReplyMarkup(
 		callback.Message.Chat.ID,
 		callback.Message.MessageID,
-		text,
+		keyboard,
 	)
-	keyboard := UnbanKeyboard(anonNum)
-	edit.ReplyMarkup = &keyboard
-	bot.Send(edit)
+	bot.Send(editMarkup)
 
-	answer := tgbotapi.NewCallback(callback.ID, "Забанен")
+	// Notify the banned user
+	banNotice := tgbotapi.NewMessage(msgInfo.UserID, "⛔ Вы были заблокированы администратором.")
+	bot.Send(banNotice)
+
+	answer := tgbotapi.NewCallback(callback.ID, fmt.Sprintf("🔒 Забанен (Анон #%d)", anonNum))
 	bot.Send(answer)
 }
 
@@ -155,15 +157,14 @@ func handleCancelBan(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	text := fmt.Sprintf("Анон #%d — бан отменён", anonNum)
-	edit := tgbotapi.NewEditMessageText(
+	// Only update the keyboard — never touch message text/caption/media
+	keyboard := BanKeyboard(anonNum)
+	editMarkup := tgbotapi.NewEditMessageReplyMarkup(
 		callback.Message.Chat.ID,
 		callback.Message.MessageID,
-		text,
+		keyboard,
 	)
-	keyboard := BanKeyboard(anonNum)
-	edit.ReplyMarkup = &keyboard
-	bot.Send(edit)
+	bot.Send(editMarkup)
 
 	answer := tgbotapi.NewCallback(callback.ID, "Отменено")
 	bot.Send(answer)
@@ -189,17 +190,16 @@ func handleUnban(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	text := fmt.Sprintf("✅ Пользователь разбанен (Анон #%d)", anonNum)
-	edit := tgbotapi.NewEditMessageText(
+	// Only update the keyboard — never touch message text/caption/media
+	keyboard := BanKeyboard(anonNum)
+	editMarkup := tgbotapi.NewEditMessageReplyMarkup(
 		callback.Message.Chat.ID,
 		callback.Message.MessageID,
-		text,
+		keyboard,
 	)
-	keyboard := BanKeyboard(anonNum)
-	edit.ReplyMarkup = &keyboard
-	bot.Send(edit)
+	bot.Send(editMarkup)
 
-	answer := tgbotapi.NewCallback(callback.ID, "Разбанен")
+	answer := tgbotapi.NewCallback(callback.ID, fmt.Sprintf("✅ Разбанен (Анон #%d)", anonNum))
 	bot.Send(answer)
 }
 
