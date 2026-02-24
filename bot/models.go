@@ -7,6 +7,10 @@ const (
 	StateIdle           = "IDLE"
 	StateWaitingContent = "WAITING_CONTENT"
 	StateWaitingConfirm = "WAITING_CONFIRM"
+
+	// Admin states for replying to anonymous users
+	StateAdminReplyContent = "ADMIN_REPLY_CONTENT"
+	StateAdminReplyConfirm = "ADMIN_REPLY_CONFIRM"
 )
 
 // Message content limits
@@ -41,4 +45,13 @@ type DraftMessage struct {
 	Text     string
 	PhotoIDs []string
 	VideoIDs []string
+}
+
+// AdminReplyDraft holds admin's reply content before sending to the user
+type AdminReplyDraft struct {
+	TargetUserID int64
+	AnonNumber   int
+	Text         string
+	PhotoIDs     []string
+	VideoIDs     []string
 }

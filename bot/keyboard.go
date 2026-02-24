@@ -14,6 +14,14 @@ func UserKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	)
 }
 
+func AdminKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	return tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("📊 Статистика"),
+		),
+	)
+}
+
 func ConfirmSendKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -27,6 +35,7 @@ func BanKeyboard(anonNumber int) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🚫 Забанить", fmt.Sprintf("ban:%d", anonNumber)),
+			tgbotapi.NewInlineKeyboardButtonData("💬 Сообщение", fmt.Sprintf("reply:%d", anonNumber)),
 		),
 	)
 }
@@ -44,6 +53,7 @@ func UnbanKeyboard(anonNumber int) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("✅ Разбанить", fmt.Sprintf("unban:%d", anonNumber)),
+			tgbotapi.NewInlineKeyboardButtonData("💬 Сообщение", fmt.Sprintf("reply:%d", anonNumber)),
 		),
 	)
 }
@@ -53,6 +63,9 @@ func InfoKeyboard(anonNumber int) tgbotapi.InlineKeyboardMarkup {
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🚫 Забанить", fmt.Sprintf("ban:%d", anonNumber)),
 			tgbotapi.NewInlineKeyboardButtonData("✅ Разбанить", fmt.Sprintf("unban:%d", anonNumber)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💬 Сообщение", fmt.Sprintf("reply:%d", anonNumber)),
 		),
 	)
 }
@@ -64,6 +77,15 @@ func SubscriptionKeyboard() tgbotapi.InlineKeyboardMarkup {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("✅ Проверить подписку", "check_subscription"),
+		),
+	)
+}
+
+func ConfirmAdminReplyKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Да, отправить", "confirm_admin_reply"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "cancel_admin_reply"),
 		),
 	)
 }
