@@ -117,6 +117,10 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			HandleStart(bot, message)
 		case "info":
 			HandleInfo(bot, message)
+		case "cancel":
+			handleCancelCommand(bot, message)
+		case "stats":
+			HandleStatistics(bot, message)
 		}
 		return
 	}
@@ -127,6 +131,36 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		return
 	}
 
+	// Кнопка "📊 Статистика" (admin only)
+	if message.Text == "📊 Статистика" {
+		HandleStatistics(bot, message)
+		return
+	}
+
 	// Обычное сообщение (текст/фото/видео) — обработка как анонимное
 	HandleUserMessage(bot, message)
+}
+
+// handleCancelCommand allows admin to cancel reply mode at any time.
+func handleCancelCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	userID := message.From.ID
+
+	// Admin cancel reply mode
+	if userID == adminID {
+		state := getState(adminID)
+		if state == StateAdminReplyContent || state == StateAdminReplyConfirm {
+			deleteAdminReplyDraft()
+			setState(adminID, StateIdle)
+			msg := tgbotapi.NewMessage(message.Chat.ID, "❌ Ответ отменён.")
+			bot.Send(msg)
+			return
+		}
+	}
+
+	// Regular user cancel
+	deleteDraft(userID)
+	setState(userID, StateIdle)
+	msg := tgbotapi.NewMessage(message.Chat.ID, "Действие отменено.")
+	msg.ReplyMarkup = UserKeyboard()
+	bot.Send(msg)
 }

@@ -153,3 +153,90 @@ func TodayMessageCount(userID int64) (int, error) {
 	).Scan(&count)
 	return count, err
 }
+
+// ── Statistics functions ──────────────────────────────────────────────────
+
+// GetTotalUsers returns the count of unique users who have sent messages.
+func GetTotalUsers() (int, error) {
+	ctx := context.Background()
+	var count int
+	err := db.QueryRow(ctx, `SELECT COUNT(DISTINCT user_id) FROM messages`).Scan(&count)
+	return count, err
+}
+
+// GetTotalMessages returns the total number of messages sent.
+func GetTotalMessages() (int, error) {
+	ctx := context.Background()
+	var count int
+	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count)
+	return count, err
+}
+
+// GetTotalBans returns the number of currently banned users.
+func GetTotalBans() (int, error) {
+	ctx := context.Background()
+	var count int
+	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM bans`).Scan(&count)
+	return count, err
+}
+
+// GetTodayMessages returns the count of messages sent today.
+func GetTodayMessages() (int, error) {
+	ctx := context.Background()
+	today := time.Now().Format("2006-01-02")
+	var count int
+	err := db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM messages WHERE created_at::date = $1::date`,
+		today,
+	).Scan(&count)
+	return count, err
+}
+
+// GetTodayUsers returns the count of unique users who sent messages today.
+func GetTodayUsers() (int, error) {
+	ctx := context.Background()
+	today := time.Now().Format("2006-01-02")
+	var count int
+	err := db.QueryRow(ctx,
+		`SELECT COUNT(DISTINCT user_id) FROM messages WHERE created_at::date = $1::date`,
+		today,
+	).Scan(&count)
+	return count, err
+}
+
+// GetWeekMessages returns the count of messages sent in the last 7 days.
+func GetWeekMessages() (int, error) {
+	ctx := context.Background()
+	var count int
+	err := db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM messages WHERE created_at >= NOW() - INTERVAL '7 days'`,
+	).Scan(&count)
+	return count, err
+}
+
+// GetTopUser returns the user_id and count of the user who sent the most messages.
+func GetTopUser() (int64, int, error) {
+	ctx := context.Background()
+	var userID int64
+	var count int
+	err := db.QueryRow(ctx,
+		`SELECT user_id, COUNT(*) as cnt FROM messages GROUP BY user_id ORDER BY cnt DESC LIMIT 1`,
+	).Scan(&userID, &count)
+	if err != nil {
+		return 0, 0, err
+	}
+	return userID, count, nil
+}
+
+// GetLastMessageTime returns the time of the most recent message.
+func GetLastMessageTime() (*time.Time, error) {
+	ctx := context.Background()
+	var t time.Time
+	err := db.QueryRow(ctx,
+		`SELECT created_at FROM messages ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&t)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}

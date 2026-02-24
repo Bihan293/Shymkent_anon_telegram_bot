@@ -74,6 +74,16 @@ func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	case "check_subscription":
 		handleCheckSubscription(bot, callback)
 		return
+	case "confirm_admin_reply":
+		if callback.From.ID == adminID {
+			handleConfirmAdminReply(bot, callback)
+		}
+		return
+	case "cancel_admin_reply":
+		if callback.From.ID == adminID {
+			handleCancelAdminReply(bot, callback)
+		}
+		return
 	}
 
 	// ── Admin-only callbacks below ─────────────────────────────────────
@@ -95,6 +105,9 @@ func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 
 	case strings.HasPrefix(data, "unban:"):
 		handleUnban(bot, callback)
+
+	case strings.HasPrefix(data, "reply:"):
+		handleReplyStart(bot, callback)
 	}
 }
 
@@ -147,7 +160,7 @@ func handleConfirmBan(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	bot.Send(editMarkup)
 
 	// Notify the banned user
-	banNotice := tgbotapi.NewMessage(msgInfo.UserID, "⛔ Вы были заблокированы администратором.")
+	banNotice := tgbotapi.NewMessage(msgInfo.UserID, "⛔ Вы были заблокированы администратором. Вы больше не можете отправлять анонимные сообщения.")
 	bot.Send(banNotice)
 
 	answer := tgbotapi.NewCallback(callback.ID, fmt.Sprintf("🔒 Забанен (Анон #%d)", anonNum))
@@ -202,9 +215,161 @@ func handleUnban(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	)
 	bot.Send(editMarkup)
 
+	// Notify the unbanned user
+	unbanNotice := tgbotapi.NewMessage(msgInfo.UserID, "✅ Вы были разблокированы. Теперь вы снова можете отправлять анонимные сообщения.")
+	bot.Send(unbanNotice)
+
 	answer := tgbotapi.NewCallback(callback.ID, fmt.Sprintf("✅ Разбанен (Анон #%d)", anonNum))
 	bot.Send(answer)
 }
+
+// ── Admin Reply to Anonymous User ─────────────────────────────────────────
+
+func handleReplyStart(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	anonNum := parseAnonNumber(callback.Data)
+	if anonNum == 0 {
+		return
+	}
+
+	msgInfo, err := GetMessageInfo(anonNum)
+	if err != nil {
+		answer := tgbotapi.NewCallback(callback.ID, "Сообщение не найдено")
+		bot.Send(answer)
+		return
+	}
+
+	// Set admin into reply mode
+	draft := &AdminReplyDraft{
+		TargetUserID: msgInfo.UserID,
+		AnonNumber:   anonNum,
+	}
+	setAdminReplyDraft(draft)
+	setState(adminID, StateAdminReplyContent)
+
+	text := fmt.Sprintf("💬 Ответ для Анон #%d\n\nОтправьте сообщение (текст, фото, видео) которое хотите переслать этому пользователю.\n\nНапишите /cancel чтобы отменить.", anonNum)
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+	bot.Send(msg)
+
+	answer := tgbotapi.NewCallback(callback.ID, fmt.Sprintf("Ответ для #%d", anonNum))
+	bot.Send(answer)
+}
+
+func handleConfirmAdminReply(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	chatID := callback.Message.Chat.ID
+
+	draft := getAdminReplyDraft()
+	if draft == nil || getState(adminID) != StateAdminReplyConfirm {
+		answer := tgbotapi.NewCallback(callback.ID, "Нечего отправлять")
+		bot.Send(answer)
+		return
+	}
+
+	// Send the reply to the user
+	sendReplyToUser(bot, draft)
+
+	// Clean up
+	deleteAdminReplyDraft()
+	setState(adminID, StateIdle)
+
+	// Delete preview message
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	confirmMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Сообщение отправлено пользователю (Анон #%d)!", draft.AnonNumber))
+	bot.Send(confirmMsg)
+
+	answer := tgbotapi.NewCallback(callback.ID, "Отправлено ✓")
+	bot.Send(answer)
+}
+
+func handleCancelAdminReply(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	chatID := callback.Message.Chat.ID
+
+	deleteAdminReplyDraft()
+	setState(adminID, StateIdle)
+
+	// Delete preview message
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	cancelMsg := tgbotapi.NewMessage(chatID, "❌ Ответ отменён.")
+	bot.Send(cancelMsg)
+
+	answer := tgbotapi.NewCallback(callback.ID, "Отменено")
+	bot.Send(answer)
+}
+
+// sendReplyToUser sends the admin's composed reply to the anonymous user.
+func sendReplyToUser(bot *tgbotapi.BotAPI, draft *AdminReplyDraft) {
+	header := "📩 Сообщение от администратора:"
+	targetID := draft.TargetUserID
+	totalMedia := len(draft.PhotoIDs) + len(draft.VideoIDs)
+
+	// Album
+	if totalMedia > 1 {
+		var mediaGroup []interface{}
+		first := true
+		for _, pid := range draft.PhotoIDs {
+			item := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(pid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
+		}
+		for _, vid := range draft.VideoIDs {
+			item := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(vid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
+		}
+
+		mg := tgbotapi.NewMediaGroup(targetID, mediaGroup)
+		bot.Send(mg)
+		return
+	}
+
+	// Single photo
+	if len(draft.PhotoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		ph := tgbotapi.NewPhoto(targetID, tgbotapi.FileID(draft.PhotoIDs[0]))
+		ph.Caption = caption
+		bot.Send(ph)
+		return
+	}
+
+	// Single video
+	if len(draft.VideoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		v := tgbotapi.NewVideo(targetID, tgbotapi.FileID(draft.VideoIDs[0]))
+		v.Caption = caption
+		bot.Send(v)
+		return
+	}
+
+	// Text only
+	text := fmt.Sprintf("%s\n\n%s", header, draft.Text)
+	msg := tgbotapi.NewMessage(targetID, text)
+	bot.Send(msg)
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 func parseAnonNumber(data string) int {
 	parts := strings.SplitN(data, ":", 2)

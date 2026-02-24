@@ -11,10 +11,11 @@ import (
 
 // ── State Machine ──────────────────────────────────────────────────────────
 var (
-	userStates   = make(map[int64]string)
-	userDrafts   = make(map[int64]*DraftMessage)
-	userCooldown = make(map[int64]time.Time) // last successful send time
-	mu           sync.Mutex
+	userStates      = make(map[int64]string)
+	userDrafts      = make(map[int64]*DraftMessage)
+	userCooldown    = make(map[int64]time.Time) // last successful send time
+	adminReplyDraft *AdminReplyDraft             // single admin reply draft
+	mu              sync.Mutex
 )
 
 const cooldownDuration = 5 * time.Minute
@@ -51,6 +52,24 @@ func deleteDraft(userID int64) {
 	mu.Lock()
 	defer mu.Unlock()
 	delete(userDrafts, userID)
+}
+
+func setAdminReplyDraft(d *AdminReplyDraft) {
+	mu.Lock()
+	defer mu.Unlock()
+	adminReplyDraft = d
+}
+
+func getAdminReplyDraft() *AdminReplyDraft {
+	mu.Lock()
+	defer mu.Unlock()
+	return adminReplyDraft
+}
+
+func deleteAdminReplyDraft() {
+	mu.Lock()
+	defer mu.Unlock()
+	adminReplyDraft = nil
 }
 
 // ── Media-group buffer ─────────────────────────────────────────────────────
@@ -121,7 +140,11 @@ func HandleStart(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 	text := "Анонимные сообщения администратору.\nОсновной канал: https://t.me/shymkent_anon"
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	msg.ReplyMarkup = UserKeyboard()
+	if message.From.ID == adminID {
+		msg.ReplyMarkup = AdminKeyboard()
+	} else {
+		msg.ReplyMarkup = UserKeyboard()
+	}
 	bot.Send(msg)
 }
 
@@ -174,9 +197,241 @@ func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	setState(userID, StateWaitingContent)
 }
 
+// HandleAdminReplyMessage processes content from admin when building a reply.
+func HandleAdminReplyMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	if message.From.ID != adminID {
+		return
+	}
+
+	state := getState(adminID)
+	if state != StateAdminReplyContent {
+		return
+	}
+
+	draft := getAdminReplyDraft()
+	if draft == nil {
+		setState(adminID, StateIdle)
+		return
+	}
+
+	// Handle media group for admin reply
+	if message.MediaGroupID != "" {
+		handleAdminReplyMediaGroup(bot, message)
+		return
+	}
+
+	// Collect content
+	if message.Photo != nil {
+		best := message.Photo[len(message.Photo)-1]
+		draft.PhotoIDs = append(draft.PhotoIDs, best.FileID)
+	}
+	if message.Video != nil {
+		draft.VideoIDs = append(draft.VideoIDs, message.Video.FileID)
+	}
+
+	if message.Caption != "" {
+		draft.Text = message.Caption
+	} else if message.Text != "" {
+		draft.Text = message.Text
+	}
+
+	if draft.Text == "" && len(draft.PhotoIDs) == 0 && len(draft.VideoIDs) == 0 {
+		return
+	}
+
+	setAdminReplyDraft(draft)
+	setState(adminID, StateAdminReplyConfirm)
+	sendAdminReplyPreview(bot, message.Chat.ID, draft)
+}
+
+// ── Admin reply media-group ───────────────────────────────────────────────
+
+var (
+	adminMediaBuffer = make(map[string][]tgbotapi.Message)
+	adminMediaTimers = make(map[string]*time.Timer)
+	adminMediaMu     sync.Mutex
+)
+
+func handleAdminReplyMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	groupID := message.MediaGroupID
+	chatID := message.Chat.ID
+
+	adminMediaMu.Lock()
+	adminMediaBuffer[groupID] = append(adminMediaBuffer[groupID], *message)
+
+	if t, ok := adminMediaTimers[groupID]; ok {
+		t.Stop()
+	}
+	adminMediaTimers[groupID] = time.AfterFunc(1*time.Second, func() {
+		adminMediaMu.Lock()
+		messages := adminMediaBuffer[groupID]
+		delete(adminMediaBuffer, groupID)
+		delete(adminMediaTimers, groupID)
+		adminMediaMu.Unlock()
+
+		draft := getAdminReplyDraft()
+		if draft == nil {
+			return
+		}
+
+		for _, m := range messages {
+			if m.Photo != nil {
+				best := m.Photo[len(m.Photo)-1]
+				draft.PhotoIDs = append(draft.PhotoIDs, best.FileID)
+			}
+			if m.Video != nil {
+				draft.VideoIDs = append(draft.VideoIDs, m.Video.FileID)
+			}
+			if draft.Text == "" && m.Caption != "" {
+				draft.Text = m.Caption
+			}
+		}
+
+		setAdminReplyDraft(draft)
+		setState(adminID, StateAdminReplyConfirm)
+		sendAdminReplyPreview(bot, chatID, draft)
+	})
+	adminMediaMu.Unlock()
+}
+
+// ── Admin reply preview ───────────────────────────────────────────────────
+
+func sendAdminReplyPreview(bot *tgbotapi.BotAPI, chatID int64, draft *AdminReplyDraft) {
+	header := fmt.Sprintf("📨 Ответ для Анон #%d — предпросмотр:", draft.AnonNumber)
+	keyboard := ConfirmAdminReplyKeyboard()
+
+	totalMedia := len(draft.PhotoIDs) + len(draft.VideoIDs)
+
+	// Album
+	if totalMedia > 1 {
+		var mediaGroup []interface{}
+		first := true
+		for _, pid := range draft.PhotoIDs {
+			item := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(pid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
+		}
+		for _, vid := range draft.VideoIDs {
+			item := tgbotapi.NewInputMediaVideo(tgbotapi.FileID(vid))
+			if first {
+				caption := header
+				if draft.Text != "" {
+					caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+				}
+				item.Caption = caption
+				first = false
+			}
+			mediaGroup = append(mediaGroup, item)
+		}
+
+		mg := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+		bot.Send(mg)
+
+		btnMsg := tgbotapi.NewMessage(chatID, "Отправить это сообщение пользователю?")
+		btnMsg.ReplyMarkup = keyboard
+		bot.Send(btnMsg)
+		return
+	}
+
+	// Single photo
+	if len(draft.PhotoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		ph := tgbotapi.NewPhoto(chatID, tgbotapi.FileID(draft.PhotoIDs[0]))
+		ph.Caption = caption
+		ph.ReplyMarkup = keyboard
+		bot.Send(ph)
+		return
+	}
+
+	// Single video
+	if len(draft.VideoIDs) == 1 {
+		caption := header
+		if draft.Text != "" {
+			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
+		}
+		v := tgbotapi.NewVideo(chatID, tgbotapi.FileID(draft.VideoIDs[0]))
+		v.Caption = caption
+		v.ReplyMarkup = keyboard
+		bot.Send(v)
+		return
+	}
+
+	// Text only
+	text := fmt.Sprintf("%s\n\n%s", header, draft.Text)
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ReplyMarkup = keyboard
+	bot.Send(msg)
+}
+
+// ── Statistics handler ────────────────────────────────────────────────────
+
+func HandleStatistics(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	if message.From.ID != adminID {
+		return
+	}
+
+	totalUsers, _ := GetTotalUsers()
+	totalMessages, _ := GetTotalMessages()
+	totalBans, _ := GetTotalBans()
+	todayMessages, _ := GetTodayMessages()
+	todayUsers, _ := GetTodayUsers()
+	weekMessages, _ := GetWeekMessages()
+
+	text := fmt.Sprintf(
+		"📊 *Статистика бота*\n\n"+
+			"👥 Всего пользователей: *%d*\n"+
+			"📨 Всего сообщений: *%d*\n"+
+			"🚫 Забанено: *%d*\n\n"+
+			"📅 *Сегодня:*\n"+
+			"   📨 Сообщений: *%d*\n"+
+			"   👥 Активных пользователей: *%d*\n\n"+
+			"📆 *За неделю:*\n"+
+			"   📨 Сообщений: *%d*\n",
+		totalUsers,
+		totalMessages,
+		totalBans,
+		todayMessages,
+		todayUsers,
+		weekMessages,
+	)
+
+	topUserID, topCount, err := GetTopUser()
+	if err == nil && topUserID != 0 {
+		text += fmt.Sprintf("\n🏆 *Топ отправитель:*\n   🆔 %d — %d сообщений\n", topUserID, topCount)
+	}
+
+	lastTime, err := GetLastMessageTime()
+	if err == nil && lastTime != nil {
+		text += fmt.Sprintf("\n🕐 Последнее сообщение: %s", lastTime.Format("02.01.2006 15:04"))
+	}
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	msg.ParseMode = "Markdown"
+	bot.Send(msg)
+}
+
 // HandleUserMessage processes incoming content when user is in WAITING_CONTENT.
 func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	userID := message.From.ID
+
+	// If admin is in reply mode, handle that instead
+	if userID == adminID {
+		state := getState(adminID)
+		if state == StateAdminReplyContent || state == StateAdminReplyConfirm {
+			HandleAdminReplyMessage(bot, message)
+			return
+		}
+	}
 
 	if getState(userID) != StateWaitingContent {
 		return
