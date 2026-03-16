@@ -4,9 +4,10 @@ import "time"
 
 // User states
 const (
-	StateIdle           = "IDLE"
-	StateWaitingContent = "WAITING_CONTENT"
-	StateWaitingConfirm = "WAITING_CONFIRM"
+	StateIdle             = "IDLE"
+	StateWaitingContent   = "WAITING_CONTENT"
+	StateWaitingConfirm   = "WAITING_CONFIRM"
+	StateChoosingLanguage = "CHOOSING_LANGUAGE"
 
 	// Admin states for replying to anonymous users
 	StateAdminReplyContent = "ADMIN_REPLY_CONTENT"
