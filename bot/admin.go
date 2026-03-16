@@ -63,6 +63,18 @@ func HandleInfo(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	data := callback.Data
 
+	// ── Language selection ────────────────────────────────────────────
+	if strings.HasPrefix(data, "lang:") {
+		handleLangSelection(bot, callback)
+		return
+	}
+
+	// ── Inline "send anon" button from welcome message ───────────────
+	if data == "start_anon" {
+		handleStartAnon(bot, callback)
+		return
+	}
+
 	// ── User confirm/cancel / subscription check ──────────────────────
 	switch data {
 	case "confirm_send":
@@ -110,6 +122,100 @@ func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		handleReplyStart(bot, callback)
 	}
 }
+
+// ── Language selection callback ──────────────────────────────────────────────
+
+func handleLangSelection(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	userID := callback.From.ID
+	chatID := callback.Message.Chat.ID
+
+	parts := strings.SplitN(callback.Data, ":", 2)
+	if len(parts) != 2 {
+		return
+	}
+	lang := parts[1]
+	if lang != LangRU && lang != LangKZ {
+		return
+	}
+
+	setUserLang(userID, lang)
+
+	// Delete the language picker message
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	// If user was in CHOOSING_LANGUAGE state (first time), show welcome
+	state := getState(userID)
+	if state == StateChoosingLanguage {
+		setState(userID, StateIdle)
+
+		// Check subscription after language choice
+		if !IsSubscribed(bot, userID) {
+			sendSubscriptionMessage(bot, chatID, lang)
+			answer := tgbotapi.NewCallback(callback.ID, "")
+			bot.Send(answer)
+			return
+		}
+
+		isAdmin := userID == adminID
+		sendWelcome(bot, chatID, lang, isAdmin)
+
+		answer := tgbotapi.NewCallback(callback.ID, "")
+		bot.Send(answer)
+		return
+	}
+
+	// Otherwise it's a language change from the menu
+	setState(userID, StateIdle)
+
+	// Send confirmation + welcome
+	confirmMsg := tgbotapi.NewMessage(chatID, t(lang, "lang_changed"))
+	confirmMsg.ParseMode = "Markdown"
+	if userID == adminID {
+		confirmMsg.ReplyMarkup = AdminKeyboard()
+	} else {
+		confirmMsg.ReplyMarkup = UserKeyboard(lang)
+	}
+	bot.Send(confirmMsg)
+
+	// Show welcome with inline
+	welcomeMsg := tgbotapi.NewMessage(chatID, t(lang, "welcome"))
+	welcomeMsg.ParseMode = "Markdown"
+	welcomeMsg.ReplyMarkup = WelcomeInlineKeyboard(lang)
+	bot.Send(welcomeMsg)
+
+	answer := tgbotapi.NewCallback(callback.ID, "")
+	bot.Send(answer)
+}
+
+// ── Inline start_anon callback ──────────────────────────────────────────────
+
+func handleStartAnon(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	userID := callback.From.ID
+	chatID := callback.Message.Chat.ID
+	lang := getUserLang(userID)
+
+	// Build a fake message to reuse HandleCreateMessage logic
+	fakeMsg := &tgbotapi.Message{
+		From: callback.From,
+		Chat: callback.Message.Chat,
+	}
+
+	// Check subscription
+	if !IsSubscribed(bot, userID) {
+		sendSubscriptionMessage(bot, chatID, lang)
+		answer := tgbotapi.NewCallback(callback.ID, "")
+		bot.Send(answer)
+		return
+	}
+
+	answer := tgbotapi.NewCallback(callback.ID, "")
+	bot.Send(answer)
+
+	HandleCreateMessage(bot, fakeMsg)
+}
+
+// ── Ban/Unban handlers ──────────────────────────────────────────────────────
 
 func handleBanRequest(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	anonNum := parseAnonNumber(callback.Data)
@@ -386,24 +492,22 @@ func parseAnonNumber(data string) int {
 func handleCheckSubscription(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	userID := callback.From.ID
 	chatID := callback.Message.Chat.ID
+	lang := getUserLang(userID)
 
 	if IsSubscribed(bot, userID) {
 		// Delete subscription message
 		del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
 		bot.Request(del)
 
-		// Send welcome message with user keyboard
-		text := "Анонимные сообщения администратору.\nОсновной канал: https://t.me/shymkent_anon"
-		msg := tgbotapi.NewMessage(chatID, text)
-		msg.ReplyMarkup = UserKeyboard()
-		bot.Send(msg)
+		isAdmin := userID == adminID
+		sendWelcome(bot, chatID, lang, isAdmin)
 
 		setState(userID, StateIdle)
 
-		answer := tgbotapi.NewCallback(callback.ID, "✅ Подписка подтверждена!")
+		answer := tgbotapi.NewCallback(callback.ID, t(lang, "sub_confirmed"))
 		bot.Send(answer)
 	} else {
-		answer := tgbotapi.NewCallback(callback.ID, "❌ Вы не подписаны на канал!")
+		answer := tgbotapi.NewCallback(callback.ID, t(lang, "sub_not_confirmed"))
 		bot.Send(answer)
 	}
 }

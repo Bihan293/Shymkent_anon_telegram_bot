@@ -6,27 +6,73 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func UserKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("✉️ Создать сообщение"),
+// ── Language selection keyboard (inline) ─────────────────────────────────────
+
+func LanguageKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🇷🇺 Русский", "lang:ru"),
+			tgbotapi.NewInlineKeyboardButtonData("🇰🇿 Қазақша", "lang:kz"),
 		),
 	)
 }
 
+// ── User main keyboard (reply keyboard at bottom) ───────────────────────────
+
+func UserKeyboard(lang string) tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(t(lang, "btn_send_anon")),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(t(lang, "btn_help")),
+			tgbotapi.NewKeyboardButton(t(lang, "btn_change_lang")),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// ── Cancel keyboard shown when user is composing a message ──────────────────
+
+func CancelKeyboard(lang string) tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(t(lang, "btn_cancel")),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// ── Admin keyboard ──────────────────────────────────────────────────────────
+
 func AdminKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	return tgbotapi.NewReplyKeyboard(
+	kb := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("📊 Статистика"),
 		),
 	)
+	kb.ResizeKeyboard = true
+	return kb
 }
 
-func ConfirmSendKeyboard() tgbotapi.InlineKeyboardMarkup {
+// ── Inline keyboards ────────────────────────────────────────────────────────
+
+func ConfirmSendKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Отправить", "confirm_send"),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "cancel_send"),
+			tgbotapi.NewInlineKeyboardButtonData(t(lang, "btn_confirm_send"), "confirm_send"),
+			tgbotapi.NewInlineKeyboardButtonData(t(lang, "btn_cancel_send"), "cancel_send"),
+		),
+	)
+}
+
+// WelcomeInlineKeyboard provides an inline button to start creating an anonymous message.
+func WelcomeInlineKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(t(lang, "btn_send_anon"), "start_anon"),
 		),
 	)
 }
@@ -70,13 +116,13 @@ func InfoKeyboard(anonNumber int) tgbotapi.InlineKeyboardMarkup {
 	)
 }
 
-func SubscriptionKeyboard() tgbotapi.InlineKeyboardMarkup {
+func SubscriptionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonURL("📢 Подписаться на канал", ChannelLink),
+			tgbotapi.NewInlineKeyboardButtonURL(t(lang, "btn_subscribe"), ChannelLink),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Проверить подписку", "check_subscription"),
+			tgbotapi.NewInlineKeyboardButtonData(t(lang, "btn_check_sub"), "check_subscription"),
 		),
 	)
 }

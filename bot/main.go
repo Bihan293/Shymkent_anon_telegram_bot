@@ -121,17 +121,47 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			handleCancelCommand(bot, message)
 		case "stats":
 			HandleStatistics(bot, message)
+		case "help":
+			HandleHelp(bot, message)
 		}
 		return
 	}
 
-	// Кнопка "Создать сообщение"
-	if message.Text == "✉️ Создать сообщение" {
+	_ = message.From.ID // userID used implicitly via HandleUserMessage
+
+	// ── Button: Send anonymous message (both languages) ─────────────
+	btnSendRU := t(LangRU, "btn_send_anon")
+	btnSendKZ := t(LangKZ, "btn_send_anon")
+	if message.Text == btnSendRU || message.Text == btnSendKZ {
 		HandleCreateMessage(bot, message)
 		return
 	}
 
-	// Кнопка "📊 Статистика" (admin only)
+	// ── Button: Help (both languages) ───────────────────────────────
+	btnHelpRU := t(LangRU, "btn_help")
+	btnHelpKZ := t(LangKZ, "btn_help")
+	if message.Text == btnHelpRU || message.Text == btnHelpKZ {
+		HandleHelp(bot, message)
+		return
+	}
+
+	// ── Button: Change language (both languages) ────────────────────
+	btnLangRU := t(LangRU, "btn_change_lang")
+	btnLangKZ := t(LangKZ, "btn_change_lang")
+	if message.Text == btnLangRU || message.Text == btnLangKZ {
+		HandleChangeLang(bot, message)
+		return
+	}
+
+	// ── Button: Cancel (both languages) ─────────────────────────────
+	btnCancelRU := t(LangRU, "btn_cancel")
+	btnCancelKZ := t(LangKZ, "btn_cancel")
+	if message.Text == btnCancelRU || message.Text == btnCancelKZ {
+		handleCancelButton(bot, message)
+		return
+	}
+
+	// ── Admin: Statistics ───────────────────────────────────────────
 	if message.Text == "📊 Статистика" {
 		HandleStatistics(bot, message)
 		return
@@ -141,9 +171,10 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	HandleUserMessage(bot, message)
 }
 
-// handleCancelCommand allows admin to cancel reply mode at any time.
+// handleCancelCommand allows admin to cancel reply mode at any time via /cancel.
 func handleCancelCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	userID := message.From.ID
+	lang := getUserLang(userID)
 
 	// Admin cancel reply mode
 	if userID == adminID {
@@ -160,7 +191,46 @@ func handleCancelCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	// Regular user cancel
 	deleteDraft(userID)
 	setState(userID, StateIdle)
-	msg := tgbotapi.NewMessage(message.Chat.ID, "Действие отменено.")
-	msg.ReplyMarkup = UserKeyboard()
-	bot.Send(msg)
+
+	isAdmin := userID == adminID
+
+	cancelMsg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "cancelled"))
+	if isAdmin {
+		cancelMsg.ReplyMarkup = AdminKeyboard()
+	} else {
+		cancelMsg.ReplyMarkup = UserKeyboard(lang)
+	}
+	bot.Send(cancelMsg)
+
+	// Show welcome again
+	welcomeMsg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "welcome"))
+	welcomeMsg.ParseMode = "Markdown"
+	welcomeMsg.ReplyMarkup = WelcomeInlineKeyboard(lang)
+	bot.Send(welcomeMsg)
+}
+
+// handleCancelButton handles the cancel reply-keyboard button press.
+func handleCancelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	userID := message.From.ID
+	lang := getUserLang(userID)
+
+	// Clean up any draft
+	deleteDraft(userID)
+	setState(userID, StateIdle)
+
+	isAdmin := userID == adminID
+
+	cancelMsg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "cancelled"))
+	if isAdmin {
+		cancelMsg.ReplyMarkup = AdminKeyboard()
+	} else {
+		cancelMsg.ReplyMarkup = UserKeyboard(lang)
+	}
+	bot.Send(cancelMsg)
+
+	// Show welcome again
+	welcomeMsg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "welcome"))
+	welcomeMsg.ParseMode = "Markdown"
+	welcomeMsg.ReplyMarkup = WelcomeInlineKeyboard(lang)
+	bot.Send(welcomeMsg)
 }

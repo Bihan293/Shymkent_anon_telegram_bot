@@ -81,16 +81,16 @@ var (
 
 // ── Validation helpers ─────────────────────────────────────────────────────
 
-func validateDraftLimits(draft *DraftMessage) string {
+func validateDraftLimits(draft *DraftMessage, lang string) string {
 	if len(draft.PhotoIDs) > MaxPhotos {
-		return fmt.Sprintf("⚠️ Слишком много фото. Максимум: %d. Вы отправили: %d.", MaxPhotos, len(draft.PhotoIDs))
+		return fmt.Sprintf(t(lang, "too_many_photos"), MaxPhotos, len(draft.PhotoIDs))
 	}
 	if len(draft.VideoIDs) > MaxVideos {
-		return fmt.Sprintf("⚠️ Слишком много видео. Максимум: %d. Вы отправили: %d.", MaxVideos, len(draft.VideoIDs))
+		return fmt.Sprintf(t(lang, "too_many_videos"), MaxVideos, len(draft.VideoIDs))
 	}
 	textLen := len([]rune(draft.Text))
 	if textLen > MaxTextLength {
-		return fmt.Sprintf("⚠️ Слишком длинный текст. Максимум: %d символов. У вас: %d.", MaxTextLength, textLen)
+		return fmt.Sprintf(t(lang, "text_too_long"), MaxTextLength, textLen)
 	}
 	return ""
 }
@@ -119,41 +119,84 @@ func IsSubscribed(bot *tgbotapi.BotAPI, userID int64) bool {
 	}
 }
 
-func sendSubscriptionMessage(bot *tgbotapi.BotAPI, chatID int64) {
-	text := "❗ Чтобы пользоваться ботом, подпишитесь на наш официальный канал:\n\n📢 " + ChannelLink
+func sendSubscriptionMessage(bot *tgbotapi.BotAPI, chatID int64, lang string) {
+	text := t(lang, "subscribe_required")
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = SubscriptionKeyboard()
+	msg.ReplyMarkup = SubscriptionKeyboard(lang)
+	bot.Send(msg)
+}
+
+// ── sendWelcome sends the main welcome message with inline+reply keyboards ──
+
+func sendWelcome(bot *tgbotapi.BotAPI, chatID int64, lang string, isAdmin bool) {
+	text := t(lang, "welcome")
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = WelcomeInlineKeyboard(lang)
+	bot.Send(msg)
+
+	// Also set the reply keyboard
+	if isAdmin {
+		kbMsg := tgbotapi.NewMessage(chatID, "👇")
+		kbMsg.ReplyMarkup = AdminKeyboard()
+		bot.Send(kbMsg)
+	} else {
+		kbMsg := tgbotapi.NewMessage(chatID, "👇")
+		kbMsg.ReplyMarkup = UserKeyboard(lang)
+		bot.Send(kbMsg)
+	}
+}
+
+// ── sendWelcomeCompact sends the welcome text + reply keyboard in one message
+
+func sendWelcomeCompact(bot *tgbotapi.BotAPI, chatID int64, lang string, isAdmin bool) {
+	text := t(lang, "welcome")
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
+	if isAdmin {
+		msg.ReplyMarkup = AdminKeyboard()
+	} else {
+		msg.ReplyMarkup = UserKeyboard(lang)
+	}
 	bot.Send(msg)
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────────
 
 func HandleStart(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
-	setState(message.From.ID, StateIdle)
-	deleteDraft(message.From.ID)
+	userID := message.From.ID
+	setState(userID, StateIdle)
+	deleteDraft(userID)
 
 	// Check channel subscription
-	if !IsSubscribed(bot, message.From.ID) {
-		sendSubscriptionMessage(bot, message.Chat.ID)
+	if !IsSubscribed(bot, userID) {
+		lang := getUserLang(userID)
+		sendSubscriptionMessage(bot, message.Chat.ID, lang)
 		return
 	}
 
-	text := "Анонимные сообщения администратору.\nОсновной канал: https://t.me/shymkent_anon"
-	msg := tgbotapi.NewMessage(message.Chat.ID, text)
-	if message.From.ID == adminID {
-		msg.ReplyMarkup = AdminKeyboard()
-	} else {
-		msg.ReplyMarkup = UserKeyboard()
+	// If language is not chosen yet, ask user to pick one
+	lang := getUserLang(userID)
+	if lang == "" {
+		setState(userID, StateChoosingLanguage)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "🌐 Выберите язык / Тілді таңдаңыз:")
+		msg.ReplyMarkup = LanguageKeyboard()
+		// Remove reply keyboard while choosing language
+		bot.Send(msg)
+		return
 	}
-	bot.Send(msg)
+
+	isAdmin := userID == adminID
+	sendWelcome(bot, message.Chat.ID, lang, isAdmin)
 }
 
 func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	userID := message.From.ID
+	lang := getUserLang(userID)
 
 	// Check channel subscription
 	if !IsSubscribed(bot, userID) {
-		sendSubscriptionMessage(bot, message.Chat.ID)
+		sendSubscriptionMessage(bot, message.Chat.ID, lang)
 		return
 	}
 
@@ -163,7 +206,7 @@ func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		return
 	}
 	if banned {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "⛔ Вы заблокированы.")
+		msg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "banned"))
 		bot.Send(msg)
 		return
 	}
@@ -172,7 +215,7 @@ func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	if remaining := getCooldownRemaining(userID); remaining > 0 {
 		minutes := int(remaining.Minutes())
 		seconds := int(remaining.Seconds()) % 60
-		text := fmt.Sprintf("⏳ Подождите %d мин. %d сек. перед отправкой следующего сообщения.", minutes, seconds)
+		text := fmt.Sprintf(t(lang, "cooldown"), minutes, seconds)
 		msg := tgbotapi.NewMessage(message.Chat.ID, text)
 		bot.Send(msg)
 		return
@@ -184,17 +227,42 @@ func HandleCreateMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		return
 	}
 	if count >= 3 {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Вы исчерпали лимит сообщений на сегодня (3/3).")
+		msg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "limit_reached"))
 		bot.Send(msg)
 		return
 	}
 
 	remaining := 3 - count
-	text := fmt.Sprintf("У вас осталось %d/3 сообщений сегодня.\nНапишите ваше сообщение. Можно прикрепить фото и видео.", remaining)
+	text := fmt.Sprintf(t(lang, "remaining"), remaining)
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	msg.ParseMode = "Markdown"
+	// Show cancel keyboard (hide main menu)
+	msg.ReplyMarkup = CancelKeyboard(lang)
 	bot.Send(msg)
 
 	setState(userID, StateWaitingContent)
+}
+
+// HandleHelp sends detailed help/instructions.
+func HandleHelp(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	userID := message.From.ID
+	lang := getUserLang(userID)
+
+	text := t(lang, "help")
+	msg := tgbotapi.NewMessage(message.Chat.ID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = UserKeyboard(lang)
+	bot.Send(msg)
+}
+
+// HandleChangeLang shows the language picker inline keyboard.
+func HandleChangeLang(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
+	userID := message.From.ID
+	lang := getUserLang(userID)
+
+	msg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "choose_lang"))
+	msg.ReplyMarkup = LanguageKeyboard()
+	bot.Send(msg)
 }
 
 // HandleAdminReplyMessage processes content from admin when building a reply.
@@ -423,6 +491,7 @@ func HandleStatistics(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 // HandleUserMessage processes incoming content when user is in WAITING_CONTENT.
 func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	userID := message.From.ID
+	lang := getUserLang(userID)
 
 	// If admin is in reply mode, handle that instead
 	if userID == adminID {
@@ -440,14 +509,14 @@ func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	// Check channel subscription
 	if !IsSubscribed(bot, userID) {
 		setState(userID, StateIdle)
-		sendSubscriptionMessage(bot, message.Chat.ID)
+		sendSubscriptionMessage(bot, message.Chat.ID, lang)
 		return
 	}
 
 	// Check ban again
 	banned, _ := IsBanned(userID)
 	if banned {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "⛔ Вы заблокированы.")
+		msg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "banned"))
 		setState(userID, StateIdle)
 		bot.Send(msg)
 		return
@@ -456,7 +525,7 @@ func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	// Check limit again
 	count, _ := CheckLimit(userID)
 	if count >= 3 {
-		msg := tgbotapi.NewMessage(message.Chat.ID, "Вы исчерпали лимит сообщений на сегодня (3/3).")
+		msg := tgbotapi.NewMessage(message.Chat.ID, t(lang, "limit_reached"))
 		setState(userID, StateIdle)
 		bot.Send(msg)
 		return
@@ -492,7 +561,7 @@ func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	}
 
 	// Validate content limits
-	if errMsg := validateDraftLimits(draft); errMsg != "" {
+	if errMsg := validateDraftLimits(draft, lang); errMsg != "" {
 		msg := tgbotapi.NewMessage(message.Chat.ID, errMsg)
 		bot.Send(msg)
 		return
@@ -500,7 +569,7 @@ func HandleUserMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 	setDraft(userID, draft)
 	setState(userID, StateWaitingConfirm)
-	sendPreview(bot, message.Chat.ID, draft)
+	sendPreview(bot, message.Chat.ID, draft, lang)
 }
 
 // ── Media-group logic ──────────────────────────────────────────────────────
@@ -509,6 +578,7 @@ func handleMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	groupID := message.MediaGroupID
 	userID := message.From.ID
 	chatID := message.Chat.ID
+	lang := getUserLang(userID)
 
 	mediaMu.Lock()
 	mediaBuffer[groupID] = append(mediaBuffer[groupID], *message)
@@ -527,7 +597,7 @@ func handleMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		draft := buildDraftFromAlbum(messages)
 
 		// Validate content limits
-		if errMsg := validateDraftLimits(draft); errMsg != "" {
+		if errMsg := validateDraftLimits(draft, lang); errMsg != "" {
 			msg := tgbotapi.NewMessage(chatID, errMsg)
 			bot.Send(msg)
 			return
@@ -535,7 +605,7 @@ func handleMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 		setDraft(userID, draft)
 		setState(userID, StateWaitingConfirm)
-		sendPreview(bot, chatID, draft)
+		sendPreview(bot, chatID, draft, lang)
 	})
 	mediaMu.Unlock()
 }
@@ -560,9 +630,9 @@ func buildDraftFromAlbum(messages []tgbotapi.Message) *DraftMessage {
 
 // ── Preview ────────────────────────────────────────────────────────────────
 
-func sendPreview(bot *tgbotapi.BotAPI, chatID int64, draft *DraftMessage) {
-	header := "Анон предпросмотр:"
-	keyboard := ConfirmSendKeyboard()
+func sendPreview(bot *tgbotapi.BotAPI, chatID int64, draft *DraftMessage, lang string) {
+	header := t(lang, "preview_header")
+	keyboard := ConfirmSendKeyboard(lang)
 
 	totalMedia := len(draft.PhotoIDs) + len(draft.VideoIDs)
 
@@ -599,7 +669,7 @@ func sendPreview(bot *tgbotapi.BotAPI, chatID int64, draft *DraftMessage) {
 		bot.Send(mg)
 
 		// Send inline keyboard as a separate text message
-		btnMsg := tgbotapi.NewMessage(chatID, "Отправить это сообщение?")
+		btnMsg := tgbotapi.NewMessage(chatID, t(lang, "confirm_question"))
 		btnMsg.ReplyMarkup = keyboard
 		bot.Send(btnMsg)
 		return
@@ -643,10 +713,11 @@ func sendPreview(bot *tgbotapi.BotAPI, chatID int64, draft *DraftMessage) {
 func handleConfirmSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	userID := callback.From.ID
 	chatID := callback.Message.Chat.ID
+	lang := getUserLang(userID)
 
 	draft := getDraft(userID)
 	if draft == nil || getState(userID) != StateWaitingConfirm {
-		answer := tgbotapi.NewCallback(callback.ID, "Нечего отправлять")
+		answer := tgbotapi.NewCallback(callback.ID, t(lang, "nothing_to_send"))
 		bot.Send(answer)
 		return
 	}
@@ -655,7 +726,7 @@ func handleConfirmSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	anonNum, err := SaveMessage(userID, username)
 	if err != nil {
 		log.Printf("SaveMessage error: %v", err)
-		answer := tgbotapi.NewCallback(callback.ID, "Ошибка, попробуйте снова")
+		answer := tgbotapi.NewCallback(callback.ID, t(lang, "error_try_again"))
 		bot.Send(answer)
 		return
 	}
@@ -672,36 +743,59 @@ func handleConfirmSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	setState(userID, StateIdle)
 	setCooldown(userID)
 
-	// Delete the preview message and send a fresh confirmation
-	// (EditMessageText fails on photo/video messages — Telegram API limitation)
+	// Delete the preview message
 	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
 	bot.Request(del)
 
-	confirmMsg := tgbotapi.NewMessage(chatID, "✅ Сообщение отправлено!")
-	confirmMsg.ReplyMarkup = UserKeyboard()
-	bot.Send(confirmMsg)
+	// Send success + show welcome again
+	isAdmin := userID == adminID
+	okMsg := tgbotapi.NewMessage(chatID, t(lang, "sent_ok"))
+	if isAdmin {
+		okMsg.ReplyMarkup = AdminKeyboard()
+	} else {
+		okMsg.ReplyMarkup = UserKeyboard(lang)
+	}
+	bot.Send(okMsg)
 
-	answer := tgbotapi.NewCallback(callback.ID, "Отправлено ✓")
+	// Send welcome with inline button
+	welcomeMsg := tgbotapi.NewMessage(chatID, t(lang, "welcome"))
+	welcomeMsg.ParseMode = "Markdown"
+	welcomeMsg.ReplyMarkup = WelcomeInlineKeyboard(lang)
+	bot.Send(welcomeMsg)
+
+	answer := tgbotapi.NewCallback(callback.ID, t(lang, "sent_callback"))
 	bot.Send(answer)
 }
 
 func handleCancelSend(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 	userID := callback.From.ID
 	chatID := callback.Message.Chat.ID
+	lang := getUserLang(userID)
 
 	deleteDraft(userID)
 	setState(userID, StateIdle)
 
-	// Delete the preview message and send a fresh cancellation
-	// (EditMessageText fails on photo/video messages — Telegram API limitation)
+	// Delete the preview message
 	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
 	bot.Request(del)
 
-	cancelMsg := tgbotapi.NewMessage(chatID, "❌ Сообщение отменено.")
-	cancelMsg.ReplyMarkup = UserKeyboard()
+	// Send cancellation + show welcome again
+	isAdmin := userID == adminID
+	cancelMsg := tgbotapi.NewMessage(chatID, t(lang, "cancelled"))
+	if isAdmin {
+		cancelMsg.ReplyMarkup = AdminKeyboard()
+	} else {
+		cancelMsg.ReplyMarkup = UserKeyboard(lang)
+	}
 	bot.Send(cancelMsg)
 
-	answer := tgbotapi.NewCallback(callback.ID, "Отменено")
+	// Send welcome with inline button
+	welcomeMsg := tgbotapi.NewMessage(chatID, t(lang, "welcome"))
+	welcomeMsg.ParseMode = "Markdown"
+	welcomeMsg.ReplyMarkup = WelcomeInlineKeyboard(lang)
+	bot.Send(welcomeMsg)
+
+	answer := tgbotapi.NewCallback(callback.ID, t(lang, "cancelled_cb"))
 	bot.Send(answer)
 }
 
