@@ -6,6 +6,23 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// ── Admin reply-keyboard button labels (must be unique strings) ──────────────
+const (
+	BtnAdminPanel        = "🛠 Админ-панель"
+	BtnAdminStats        = "📊 Статистика"
+	BtnAdminBroadcast    = "📣 Рассылка"
+	BtnAdminBack         = "⬅️ Назад"
+	BtnAdminBcastUsers   = "👥 По пользователям бота"
+	BtnAdminBcastChannel = "📢 В канал"
+	BtnAdminAddChannel   = "➕ Добавить канал"
+	BtnAdminListChannels = "📋 Список каналов"
+	BtnAdminCancel       = "❌ Отменить"
+	BtnAdminSkip         = "➡️ Пропустить"
+	BtnAdminAddButtons   = "🔘 Добавить кнопки"
+	BtnAdminNoButtons    = "🚫 Без кнопок"
+	BtnAdminPreview      = "👁 Предпросмотр"
+)
+
 // ── Language selection keyboard (inline) ─────────────────────────────────────
 
 func LanguageKeyboard() tgbotapi.InlineKeyboardMarkup {
@@ -45,12 +62,102 @@ func CancelKeyboard(lang string) tgbotapi.ReplyKeyboardMarkup {
 	return kb
 }
 
-// ── Admin keyboard ──────────────────────────────────────────────────────────
+// ── Admin keyboard (main) ───────────────────────────────────────────────────
 
 func AdminKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	kb := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("📊 Статистика"),
+			tgbotapi.NewKeyboardButton(BtnAdminPanel),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// AdminPanelKeyboard — main admin panel reply keyboard.
+func AdminPanelKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminStats),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminBroadcast),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminBack),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// AdminBroadcastKeyboard — choose broadcast target.
+func AdminBroadcastKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminBcastUsers),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminBcastChannel),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminBack),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// AdminChannelMenuKeyboard — manage channels.
+func AdminChannelMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminAddChannel),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminListChannels),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminBack),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// AdminComposeKeyboard — keyboard while composing broadcast content.
+func AdminComposeKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminPreview),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminCancel),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// AdminButtonsStepKeyboard — keyboard while asking for inline buttons.
+func AdminButtonsStepKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminNoButtons),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminCancel),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// AdminCancelOnlyKeyboard — only cancel.
+func AdminCancelOnlyKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminCancel),
 		),
 	)
 	kb.ResizeKeyboard = true
@@ -134,4 +241,68 @@ func ConfirmAdminReplyKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "cancel_admin_reply"),
 		),
 	)
+}
+
+// ConfirmBroadcastKeyboard — confirm or cancel a broadcast.
+func ConfirmBroadcastKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Запустить рассылку", "bcast_confirm"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Отмена", "bcast_cancel"),
+		),
+	)
+}
+
+// ChannelsListKeyboard — inline list of stored channels for selection or removal.
+func ChannelsListKeyboard(channels []Channel, action string) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range channels {
+		title := c.Title
+		if title == "" {
+			title = c.ChatID
+		}
+		btn := tgbotapi.NewInlineKeyboardButtonData(
+			"📢 "+title,
+			fmt.Sprintf("%s:%d", action, c.ID),
+		)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+// ChannelRemoveKeyboard — inline keyboard with remove button per channel.
+func ChannelRemoveKeyboard(channels []Channel) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range channels {
+		title := c.Title
+		if title == "" {
+			title = c.ChatID
+		}
+		rows = append(rows,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(
+					"🗑 "+title,
+					fmt.Sprintf("chan_remove:%d", c.ID),
+				),
+			),
+		)
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+// BuildBroadcastInlineKeyboard converts admin's button list into Telegram inline keyboard.
+func BuildBroadcastInlineKeyboard(buttons []InlineButton) *tgbotapi.InlineKeyboardMarkup {
+	if len(buttons) == 0 {
+		return nil
+	}
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, b := range buttons {
+		rows = append(rows,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonURL(b.Text, b.URL),
+			),
+		)
+	}
+	kb := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	return &kb
 }

@@ -120,8 +120,156 @@ func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 
 	case strings.HasPrefix(data, "reply:"):
 		handleReplyStart(bot, callback)
+
+	case data == "bcast_confirm":
+		handleBroadcastConfirm(bot, callback)
+
+	case data == "bcast_cancel":
+		handleBroadcastCancelCb(bot, callback)
+
+	case strings.HasPrefix(data, "chan_select:"):
+		handleChannelSelect(bot, callback)
+
+	case strings.HasPrefix(data, "chan_remove:"):
+		handleChannelRemove(bot, callback)
 	}
 }
+
+// ── Broadcast callback handlers ─────────────────────────
+
+func handleBroadcastConfirm(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	chatID := callback.Message.Chat.ID
+
+	state := getState(adminID)
+	if state != StateAdminBcastUsersConfirm && state != StateAdminBcastChanConfirm {
+		answer := tgbotapi.NewCallback(callback.ID, "Нет активной рассылки")
+		bot.Send(answer)
+		return
+	}
+
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	answer := tgbotapi.NewCallback(callback.ID, "Запускаю...")
+	bot.Send(answer)
+
+	ExecuteBroadcast(bot, chatID)
+}
+
+func handleBroadcastCancelCb(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	chatID := callback.Message.Chat.ID
+
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	CancelBroadcast(bot, chatID)
+
+	answer := tgbotapi.NewCallback(callback.ID, "Отменено")
+	bot.Send(answer)
+}
+
+func handleChannelSelect(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	chatID := callback.Message.Chat.ID
+
+	parts := strings.SplitN(callback.Data, ":", 2)
+	if len(parts) != 2 {
+		return
+	}
+	id, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return
+	}
+	ch, err := GetChannelByID(id)
+	if err != nil {
+		answer := tgbotapi.NewCallback(callback.ID, "Канал не найден")
+		bot.Send(answer)
+		return
+	}
+
+	setBroadcastDraft(&BroadcastDraft{
+		Target:    BroadcastChannel,
+		ChannelID: ch.ChatID,
+	})
+	setState(adminID, StateAdminBcastChanContent)
+
+	del := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+	bot.Request(del)
+
+	title := ch.Title
+	if title == "" {
+		title = ch.ChatID
+	}
+	text := fmt.Sprintf(
+		"📢 *Рассылка в канал «%s»*\n\n"+
+			"Отправьте сообщение для публикации.\n\n"+
+			"Можно отправить:\n"+
+			"• Текст\n"+
+			"• Фото (до 8 шт.)\n"+
+			"• Видео (до 3 шт.)\n"+
+			"• Альбом с подписью\n\n"+
+			"После — нажмите *«👁 Предпросмотр»*.", title)
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = AdminComposeKeyboard()
+	bot.Send(msg)
+
+	answer := tgbotapi.NewCallback(callback.ID, "Канал выбран")
+	bot.Send(answer)
+}
+
+func handleChannelRemove(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
+	chatID := callback.Message.Chat.ID
+
+	parts := strings.SplitN(callback.Data, ":", 2)
+	if len(parts) != 2 {
+		return
+	}
+	id, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return
+	}
+	ch, err := GetChannelByID(id)
+	if err != nil {
+		answer := tgbotapi.NewCallback(callback.ID, "Канал не найден")
+		bot.Send(answer)
+		return
+	}
+
+	if err := RemoveChannel(ch.ChatID); err != nil {
+		answer := tgbotapi.NewCallback(callback.ID, "Ошибка удаления")
+		bot.Send(answer)
+		return
+	}
+
+	channels, _ := ListChannels()
+	if len(channels) == 0 {
+		edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID,
+			"📭 Список каналов пуст.")
+		bot.Send(edit)
+	} else {
+		var sb strings.Builder
+		sb.WriteString("📋 *Список каналов:*\n\n")
+		for i, c := range channels {
+			title := c.Title
+			if title == "" {
+				title = "(без названия)"
+			}
+			sb.WriteString(fmt.Sprintf("%d. *%s*\n   `%s`\n\n", i+1, title, c.ChatID))
+		}
+		sb.WriteString("Нажмите на канал чтобы удалить его:")
+
+		kb := ChannelRemoveKeyboard(channels)
+		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, callback.Message.MessageID,
+			sb.String(), kb)
+		edit.ParseMode = "Markdown"
+		bot.Send(edit)
+	}
+
+	answer := tgbotapi.NewCallback(callback.ID, "Канал удален")
+	bot.Send(answer)
+}
+
+// ── Language selection callback ─────────────────────────
 
 // ── Language selection callback ──────────────────────────────────────────────
 
