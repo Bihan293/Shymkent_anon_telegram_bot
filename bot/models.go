@@ -12,6 +12,17 @@ const (
 	// Admin states for replying to anonymous users
 	StateAdminReplyContent = "ADMIN_REPLY_CONTENT"
 	StateAdminReplyConfirm = "ADMIN_REPLY_CONFIRM"
+
+	// Admin broadcast states (to bot users)
+	StateAdminBcastUsersContent = "ADMIN_BCAST_USERS_CONTENT"
+	StateAdminBcastUsersButtons = "ADMIN_BCAST_USERS_BUTTONS"
+	StateAdminBcastUsersConfirm = "ADMIN_BCAST_USERS_CONFIRM"
+
+	// Admin broadcast states (to channel)
+	StateAdminBcastChanTarget  = "ADMIN_BCAST_CHAN_TARGET"
+	StateAdminBcastChanContent = "ADMIN_BCAST_CHAN_CONTENT"
+	StateAdminBcastChanButtons = "ADMIN_BCAST_CHAN_BUTTONS"
+	StateAdminBcastChanConfirm = "ADMIN_BCAST_CHAN_CONFIRM"
 )
 
 // Message content limits
@@ -55,4 +66,28 @@ type AdminReplyDraft struct {
 	Text         string
 	PhotoIDs     []string
 	VideoIDs     []string
+}
+
+// InlineButton represents one inline url button used in broadcasts.
+type InlineButton struct {
+	Text string
+	URL  string
+}
+
+// BroadcastTarget defines the target type of a broadcast.
+type BroadcastTarget string
+
+const (
+	BroadcastUsers   BroadcastTarget = "USERS"
+	BroadcastChannel BroadcastTarget = "CHANNEL"
+)
+
+// BroadcastDraft holds an admin's broadcast composition before sending.
+type BroadcastDraft struct {
+	Target    BroadcastTarget
+	ChannelID string // for channel broadcast: @username or -100... id
+	Text      string
+	PhotoIDs  []string
+	VideoIDs  []string
+	Buttons   []InlineButton
 }

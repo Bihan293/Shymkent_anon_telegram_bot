@@ -47,6 +47,21 @@ func createTables() error {
 			date TEXT NOT NULL,
 			PRIMARY KEY (user_id, date)
 		)`,
+		// users table for broadcasting to all who interacted with the bot
+		`CREATE TABLE IF NOT EXISTS users (
+			user_id BIGINT PRIMARY KEY,
+			username TEXT NOT NULL DEFAULT '',
+			first_name TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			last_seen TIMESTAMP NOT NULL DEFAULT NOW()
+		)`,
+		// channels saved by admin for broadcasts
+		`CREATE TABLE IF NOT EXISTS channels (
+			id SERIAL PRIMARY KEY,
+			chat_id TEXT NOT NULL UNIQUE,
+			title TEXT NOT NULL DEFAULT '',
+			added_at TIMESTAMP NOT NULL DEFAULT NOW()
+		)`,
 	}
 
 	for _, q := range queries {
@@ -56,6 +71,112 @@ func createTables() error {
 	}
 
 	return nil
+}
+
+// ── User registration ─────────────────────────────────────────────────────
+
+// UpsertUser stores/updates a user in the users table for broadcasting purposes.
+func UpsertUser(userID int64, username, firstName string) error {
+	ctx := context.Background()
+	_, err := db.Exec(ctx,
+		`INSERT INTO users (user_id, username, first_name, last_seen)
+		 VALUES ($1, $2, $3, NOW())
+		 ON CONFLICT (user_id) DO UPDATE
+		 SET username = EXCLUDED.username,
+		     first_name = EXCLUDED.first_name,
+		     last_seen = NOW()`,
+		userID, username, firstName,
+	)
+	return err
+}
+
+// GetAllUserIDs returns every user_id stored in the users table.
+func GetAllUserIDs() ([]int64, error) {
+	ctx := context.Background()
+	rows, err := db.Query(ctx, `SELECT user_id FROM users`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// GetUsersCount returns total registered users (table-based).
+func GetUsersCount() (int, error) {
+	ctx := context.Background()
+	var c int
+	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&c)
+	return c, err
+}
+
+// ── Channels ──────────────────────────────────────────────────────────────
+
+type Channel struct {
+	ID      int
+	ChatID  string
+	Title   string
+	AddedAt time.Time
+}
+
+// AddChannel inserts or updates a channel for broadcasting.
+func AddChannel(chatID, title string) error {
+	ctx := context.Background()
+	_, err := db.Exec(ctx,
+		`INSERT INTO channels (chat_id, title) VALUES ($1, $2)
+		 ON CONFLICT (chat_id) DO UPDATE SET title = EXCLUDED.title`,
+		chatID, title,
+	)
+	return err
+}
+
+// RemoveChannel deletes a channel by chat_id.
+func RemoveChannel(chatID string) error {
+	ctx := context.Background()
+	_, err := db.Exec(ctx, `DELETE FROM channels WHERE chat_id = $1`, chatID)
+	return err
+}
+
+// ListChannels returns all stored channels.
+func ListChannels() ([]Channel, error) {
+	ctx := context.Background()
+	rows, err := db.Query(ctx, `SELECT id, chat_id, title, added_at FROM channels ORDER BY added_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Channel
+	for rows.Next() {
+		var c Channel
+		if err := rows.Scan(&c.ID, &c.ChatID, &c.Title, &c.AddedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// GetChannelByID returns a channel by its db id.
+func GetChannelByID(id int) (*Channel, error) {
+	ctx := context.Background()
+	var c Channel
+	err := db.QueryRow(ctx,
+		`SELECT id, chat_id, title, added_at FROM channels WHERE id = $1`,
+		id,
+	).Scan(&c.ID, &c.ChatID, &c.Title, &c.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 // SaveMessage inserts a row and returns the auto-generated anon_number.
