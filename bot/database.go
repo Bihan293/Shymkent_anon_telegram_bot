@@ -62,6 +62,19 @@ func createTables() error {
 			title TEXT NOT NULL DEFAULT '',
 			added_at TIMESTAMP NOT NULL DEFAULT NOW()
 		)`,
+		// channels for mandatory subscription
+		`CREATE TABLE IF NOT EXISTS required_channels (
+			id SERIAL PRIMARY KEY,
+			chat_id TEXT NOT NULL UNIQUE,
+			title TEXT NOT NULL DEFAULT '',
+			invite_link TEXT NOT NULL DEFAULT '',
+			added_at TIMESTAMP NOT NULL DEFAULT NOW()
+		)`,
+		// settings storage (key-value)
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 
 	for _, q := range queries {
@@ -177,6 +190,107 @@ func GetChannelByID(id int) (*Channel, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// ── Required (mandatory subscription) channels ────────────────────────────
+
+type RequiredChannel struct {
+	ID         int
+	ChatID     string
+	Title      string
+	InviteLink string
+	AddedAt    time.Time
+}
+
+// AddRequiredChannel inserts or updates a channel that's mandatory for subscription.
+func AddRequiredChannel(chatID, title, inviteLink string) error {
+	ctx := context.Background()
+	_, err := db.Exec(ctx,
+		`INSERT INTO required_channels (chat_id, title, invite_link)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (chat_id) DO UPDATE
+		 SET title = EXCLUDED.title,
+		     invite_link = EXCLUDED.invite_link`,
+		chatID, title, inviteLink,
+	)
+	return err
+}
+
+// RemoveRequiredChannel deletes a required channel by chat_id.
+func RemoveRequiredChannel(chatID string) error {
+	ctx := context.Background()
+	_, err := db.Exec(ctx, `DELETE FROM required_channels WHERE chat_id = $1`, chatID)
+	return err
+}
+
+// ListRequiredChannels returns all stored required-subscription channels.
+func ListRequiredChannels() ([]RequiredChannel, error) {
+	ctx := context.Background()
+	rows, err := db.Query(ctx,
+		`SELECT id, chat_id, title, invite_link, added_at
+		 FROM required_channels ORDER BY added_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RequiredChannel
+	for rows.Next() {
+		var c RequiredChannel
+		if err := rows.Scan(&c.ID, &c.ChatID, &c.Title, &c.InviteLink, &c.AddedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// GetRequiredChannelByID returns a required channel by its db id.
+func GetRequiredChannelByID(id int) (*RequiredChannel, error) {
+	ctx := context.Background()
+	var c RequiredChannel
+	err := db.QueryRow(ctx,
+		`SELECT id, chat_id, title, invite_link, added_at
+		 FROM required_channels WHERE id = $1`,
+		id,
+	).Scan(&c.ID, &c.ChatID, &c.Title, &c.InviteLink, &c.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// CountRequiredChannels returns total number of mandatory subscription channels.
+func CountRequiredChannels() (int, error) {
+	ctx := context.Background()
+	var c int
+	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM required_channels`).Scan(&c)
+	return c, err
+}
+
+// ── Settings (key-value) ──────────────────────────────────────────────────
+
+// GetSetting returns the value for a key (empty string if not set).
+func GetSetting(key string) (string, error) {
+	ctx := context.Background()
+	var v string
+	err := db.QueryRow(ctx, `SELECT value FROM settings WHERE key = $1`, key).Scan(&v)
+	if err != nil {
+		// not found is not an error here — just return empty
+		return "", nil
+	}
+	return v, nil
+}
+
+// SetSetting upserts a key/value pair.
+func SetSetting(key, value string) error {
+	ctx := context.Background()
+	_, err := db.Exec(ctx,
+		`INSERT INTO settings (key, value) VALUES ($1, $2)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		key, value,
+	)
+	return err
 }
 
 // SaveMessage inserts a row and returns the auto-generated anon_number.

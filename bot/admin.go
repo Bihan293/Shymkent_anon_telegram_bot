@@ -132,6 +132,9 @@ func HandleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 
 	case strings.HasPrefix(data, "chan_remove:"):
 		handleChannelRemove(bot, callback)
+
+	case strings.HasPrefix(data, "reqchan_remove:"):
+		HandleRequiredChannelRemoveCallback(bot, callback)
 	}
 }
 

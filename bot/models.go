@@ -23,6 +23,10 @@ const (
 	StateAdminBcastChanContent = "ADMIN_BCAST_CHAN_CONTENT"
 	StateAdminBcastChanButtons = "ADMIN_BCAST_CHAN_BUTTONS"
 	StateAdminBcastChanConfirm = "ADMIN_BCAST_CHAN_CONFIRM"
+
+	// Admin states for managing mandatory subscription channels
+	StateAdminReqChanAdd     = "ADMIN_REQCHAN_ADD"
+	StateAdminReqChanEditMsg = "ADMIN_REQCHAN_EDITMSG"
 )
 
 // Message content limits
@@ -32,10 +36,9 @@ const (
 	MaxTextLength = 2000
 )
 
-// Channel for mandatory subscription check
+// Settings keys (stored in DB).
 const (
-	ChannelUsername = "@Kazakhstan_anon"
-	ChannelLink     = "https://t.me/Kazakhstan_anon"
+	SettingSubscribeMessage = "subscribe_message" // custom welcome/prompt text shown when user must subscribe
 )
 
 type Message struct {

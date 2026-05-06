@@ -103,6 +103,29 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		if u := update.CallbackQuery.From; u != nil {
 			_ = UpsertUser(u.ID, u.UserName, u.FirstName)
 		}
+
+		// Mandatory subscription guard for callbacks too — but allow:
+		// • check_subscription (so user can verify after subscribing)
+		// • lang:* (language picker shown before sub check on first start)
+		cb := update.CallbackQuery
+		if cb.From != nil && cb.From.ID != adminID {
+			data := cb.Data
+			allow := data == "check_subscription" ||
+				strings.HasPrefix(data, "lang:")
+			if !allow && !IsSubscribed(bot, cb.From.ID) {
+				lang := getUserLang(cb.From.ID)
+				if lang == "" {
+					lang = LangRU
+				}
+				if cb.Message != nil {
+					sendSubscriptionMessage(bot, cb.Message.Chat.ID, lang)
+				}
+				ack := tgbotapi.NewCallback(cb.ID, "")
+				bot.Send(ack)
+				return
+			}
+		}
+
 		HandleCallback(bot, update.CallbackQuery)
 		return
 	}
@@ -124,12 +147,38 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		if handleAdminPanelButton(bot, message) {
 			return
 		}
-		// Admin in a multi-step state (broadcast/reply) — route to that handler
+		// Admin in a multi-step state (broadcast/reply/required-subs) — route to that handler
 		state := getState(adminID)
+		if state == StateAdminReqChanAdd {
+			HandleAddRequiredChannelInput(bot, message)
+			return
+		}
+		if state == StateAdminReqEditMsg {
+			HandleEditSubscribeMessageInput(bot, message)
+			return
+		}
 		if IsBroadcastState(state) {
 			if handleAdminBroadcastFlow(bot, message, state) {
 				return
 			}
+		}
+	}
+
+	// ── Mandatory subscription guard for non-admin users ─────────────────
+	// Any action (command/button/text/media) is blocked until the user is
+	// subscribed to all configured required channels. If no channels are
+	// configured, IsSubscribed returns true and nothing is shown.
+	if message.From != nil && message.From.ID != adminID {
+		if !IsSubscribed(bot, message.From.ID) {
+			lang := getUserLang(message.From.ID)
+			if lang == "" {
+				lang = LangRU
+			}
+			// Reset any in-progress flow so user starts clean after subscribing.
+			deleteDraft(message.From.ID)
+			setState(message.From.ID, StateIdle)
+			sendSubscriptionMessage(bot, message.Chat.ID, lang)
+			return
 		}
 	}
 
@@ -204,7 +253,8 @@ func openAdminPanel(bot *tgbotapi.BotAPI, chatID int64) {
 	text := "🛠 *Админ-панель*\n\n" +
 		"Выберите раздел:\n\n" +
 		"📊 *Статистика* — общие показатели бота\n" +
-		"📣 *Рассылка* — отправка сообщений пользователям или в канал"
+		"📣 *Рассылка* — отправка сообщений пользователям или в канал\n" +
+		"🔔 *Обязательная подписка* — каналы, на которые должен подписаться пользователь"
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminPanelKeyboard()
@@ -251,6 +301,26 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 		ShowChannelsList(bot, chatID)
 		return true
 
+	case BtnAdminRequiredSubs:
+		OpenRequiredSubsMenu(bot, chatID)
+		return true
+
+	case BtnAdminReqAddChannel:
+		PromptAddRequiredChannel(bot, chatID)
+		return true
+
+	case BtnAdminReqListChannels:
+		ShowRequiredChannelsList(bot, chatID)
+		return true
+
+	case BtnAdminReqEditMessage:
+		PromptEditSubscribeMessage(bot, chatID)
+		return true
+
+	case BtnAdminReqResetMessage:
+		ResetSubscribeMessage(bot, chatID)
+		return true
+
 	case BtnAdminBack:
 		// Context-dependent back: cancel any draft and return to main admin panel
 		deleteBroadcastDraft()
@@ -261,7 +331,8 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 	case BtnAdminCancel:
 		// Cancel any in-progress admin operation
 		state := getState(adminID)
-		if IsBroadcastState(state) || state == StateAdminReplyContent || state == StateAdminReplyConfirm {
+		if IsBroadcastState(state) || state == StateAdminReplyContent || state == StateAdminReplyConfirm ||
+			state == StateAdminReqChanAdd || state == StateAdminReqEditMsg {
 			deleteBroadcastDraft()
 			deleteAdminReplyDraft()
 			setState(adminID, StateIdle)
