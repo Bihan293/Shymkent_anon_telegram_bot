@@ -21,6 +21,13 @@ const (
 	BtnAdminAddButtons   = "🔘 Добавить кнопки"
 	BtnAdminNoButtons    = "🚫 Без кнопок"
 	BtnAdminPreview      = "👁 Предпросмотр"
+
+	// Mandatory subscription management
+	BtnAdminRequiredSubs    = "🔔 Обязательная подписка"
+	BtnAdminReqAddChannel   = "➕ Добавить канал подписки"
+	BtnAdminReqListChannels = "📋 Список каналов подписки"
+	BtnAdminReqEditMessage  = "✏️ Текст приветствия"
+	BtnAdminReqResetMessage = "♻️ Сбросить текст"
 )
 
 // ── Language selection keyboard (inline) ─────────────────────────────────────
@@ -84,11 +91,55 @@ func AdminPanelKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton(BtnAdminBroadcast),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminRequiredSubs),
+		),
+		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(BtnAdminBack),
 		),
 	)
 	kb.ResizeKeyboard = true
 	return kb
+}
+
+// AdminRequiredSubsKeyboard — manage mandatory subscription channels.
+func AdminRequiredSubsKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminReqAddChannel),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminReqListChannels),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminReqEditMessage),
+			tgbotapi.NewKeyboardButton(BtnAdminReqResetMessage),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminBack),
+		),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// RequiredChannelRemoveKeyboard — inline keyboard to remove required channels.
+func RequiredChannelRemoveKeyboard(channels []RequiredChannel) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range channels {
+		title := c.Title
+		if title == "" {
+			title = c.ChatID
+		}
+		rows = append(rows,
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData(
+					"🗑 "+title,
+					fmt.Sprintf("reqchan_remove:%d", c.ID),
+				),
+			),
+		)
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
 // AdminBroadcastKeyboard — choose broadcast target.
@@ -223,15 +274,53 @@ func InfoKeyboard(anonNumber int) tgbotapi.InlineKeyboardMarkup {
 	)
 }
 
-func SubscriptionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
-	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonURL(t(lang, "btn_subscribe"), ChannelLink),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(t(lang, "btn_check_sub"), "check_subscription"),
-		),
-	)
+// SubscriptionKeyboard builds an inline keyboard with one URL-button per
+// required channel and a "check subscription" button at the bottom.
+func SubscriptionKeyboard(lang string, channels []RequiredChannel) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	for _, c := range channels {
+		title := c.Title
+		if title == "" {
+			title = t(lang, "btn_subscribe")
+		}
+		link := c.InviteLink
+		if link == "" {
+			link = buildChannelLink(c.ChatID)
+		}
+		if link == "" {
+			// can't build a URL button without a link — skip this channel
+			continue
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonURL("📢 "+title, link),
+		))
+	}
+
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(t(lang, "btn_check_sub"), "check_subscription"),
+	))
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+// buildChannelLink returns a usable t.me/... link for a stored chat reference.
+// For @username channels — we can build https://t.me/<name>.
+// For numeric -100... ids we have nothing without a stored invite_link, so we
+// return "" and let the caller skip the row.
+func buildChannelLink(chatRef string) string {
+	if chatRef == "" {
+		return ""
+	}
+	if chatRef[0] == '@' {
+		return "https://t.me/" + chatRef[1:]
+	}
+	if chatRef[0] != '-' && (chatRef[0] < '0' || chatRef[0] > '9') {
+		// looks like a username without @
+		return "https://t.me/" + chatRef
+	}
+	// numeric id — no public link without stored invite link
+	return ""
 }
 
 func ConfirmAdminReplyKeyboard() tgbotapi.InlineKeyboardMarkup {

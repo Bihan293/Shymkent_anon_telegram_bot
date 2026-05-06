@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,17 +99,60 @@ func validateDraftLimits(draft *DraftMessage, lang string) string {
 
 // ── Subscription check ─────────────────────────────────────────────────────
 
+// IsSubscribed checks subscription on every required channel stored in DB.
+// If there are no required channels — returns true (no subscription needed).
+// Admin is always considered subscribed (so admin panel works regardless).
 func IsSubscribed(bot *tgbotapi.BotAPI, userID int64) bool {
-	chatCfg := tgbotapi.GetChatMemberConfig{
-		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
-			SuperGroupUsername: ChannelUsername,
-			UserID:             userID,
-		},
+	if userID == adminID {
+		return true
 	}
 
-	member, err := bot.GetChatMember(chatCfg)
+	channels, err := ListRequiredChannels()
 	if err != nil {
-		log.Printf("GetChatMember error for user %d: %v", userID, err)
+		log.Printf("ListRequiredChannels error: %v", err)
+		// On DB error: don't block users
+		return true
+	}
+	if len(channels) == 0 {
+		return true
+	}
+
+	for _, ch := range channels {
+		if !isMemberOfChannel(bot, ch.ChatID, userID) {
+			return false
+		}
+	}
+	return true
+}
+
+// isMemberOfChannel checks whether userID is in the channel identified by chatRef.
+// chatRef can be a numeric chat_id (e.g. -1001234567890) or @username.
+func isMemberOfChannel(bot *tgbotapi.BotAPI, chatRef string, userID int64) bool {
+	var cfg tgbotapi.GetChatMemberConfig
+	if id, err := strconv.ParseInt(chatRef, 10, 64); err == nil {
+		cfg = tgbotapi.GetChatMemberConfig{
+			ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+				ChatID: id,
+				UserID: userID,
+			},
+		}
+	} else {
+		uname := chatRef
+		if !strings.HasPrefix(uname, "@") {
+			uname = "@" + uname
+		}
+		cfg = tgbotapi.GetChatMemberConfig{
+			ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+				SuperGroupUsername: uname,
+				UserID:             userID,
+			},
+		}
+	}
+
+	member, err := bot.GetChatMember(cfg)
+	if err != nil {
+		log.Printf("GetChatMember error for user %d in %s: %v", userID, chatRef, err)
+		// If we can't verify (bot not admin etc.) — treat as not subscribed
 		return false
 	}
 
@@ -119,10 +164,31 @@ func IsSubscribed(bot *tgbotapi.BotAPI, userID int64) bool {
 	}
 }
 
+// EnforceSubscription returns true when the user is subscribed (or no channels configured).
+// Otherwise it sends them the subscription prompt and returns false.
+func EnforceSubscription(bot *tgbotapi.BotAPI, chatID, userID int64, lang string) bool {
+	if IsSubscribed(bot, userID) {
+		return true
+	}
+	sendSubscriptionMessage(bot, chatID, lang)
+	return false
+}
+
 func sendSubscriptionMessage(bot *tgbotapi.BotAPI, chatID int64, lang string) {
-	text := t(lang, "subscribe_required")
+	channels, _ := ListRequiredChannels()
+	if len(channels) == 0 {
+		// Nothing configured — nothing to show.
+		return
+	}
+
+	// Custom admin-defined message has priority over default i18n one.
+	text, _ := GetSetting(SettingSubscribeMessage)
+	if strings.TrimSpace(text) == "" {
+		text = t(lang, "subscribe_required")
+	}
+
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = SubscriptionKeyboard(lang)
+	msg.ReplyMarkup = SubscriptionKeyboard(lang, channels)
 	bot.Send(msg)
 }
 
