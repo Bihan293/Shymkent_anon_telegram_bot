@@ -127,8 +127,6 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		return
 	}
 
-	_ = message.From.ID // userID used implicitly via HandleUserMessage
-
 	// ── Button: Send anonymous message (both languages) ─────────────
 	btnSendRU := t(LangRU, "btn_send_anon")
 	btnSendKZ := t(LangKZ, "btn_send_anon")

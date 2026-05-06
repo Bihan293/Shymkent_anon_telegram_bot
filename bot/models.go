@@ -23,8 +23,8 @@ const (
 
 // Channel for mandatory subscription check
 const (
-	ChannelUsername = "@shymkent_anon"
-	ChannelLink    = "https://t.me/shymkent_anon"
+	ChannelUsername = "@Kazakhstan_anon"
+	ChannelLink     = "https://t.me/Kazakhstan_anon"
 )
 
 type Message struct {
