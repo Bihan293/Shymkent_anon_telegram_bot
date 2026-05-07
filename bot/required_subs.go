@@ -85,7 +85,7 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 	var title string
 	var inviteLink string
 
-	// 1. forwarded from channel
+	// 1. forwarded from channel — preferred path, works for private channels too.
 	if message.ForwardFromChat != nil && message.ForwardFromChat.IsChannel() {
 		chatRef = strconv.FormatInt(message.ForwardFromChat.ID, 10)
 		title = message.ForwardFromChat.Title
@@ -95,35 +95,25 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 	} else {
 		raw := strings.TrimSpace(message.Text)
 		if raw == "" {
-			bot.Send(tgbotapi.NewMessage(chatID,
-				"⚠️ Перешлите пост из канала, отправьте ссылку, @username или ID."))
+			msg := tgbotapi.NewMessage(chatID,
+				"⚠️ Перешлите пост из канала, отправьте ссылку, @username или ID.")
+			msg.ReplyMarkup = AdminCancelOnlyKeyboard()
+			bot.Send(msg)
 			return
 		}
 
-		// t.me link
-		if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "t.me/") {
-			inviteLink = raw
-			idx := strings.Index(raw, "t.me/")
-			if idx == -1 {
-				bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Не похоже на ссылку Telegram."))
-				return
-			}
-			tail := strings.TrimRight(raw[idx+5:], "/")
-			if tail == "" {
-				bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Пустая ссылка."))
-				return
-			}
-			if strings.HasPrefix(tail, "+") || strings.HasPrefix(tail, "joinchat/") {
-				bot.Send(tgbotapi.NewMessage(chatID,
-					"❌ Это приватная ссылка. Для приватных каналов:\n"+
-						"1) Добавьте бота в канал как админа\n"+
-						"2) Перешлите сюда любой пост из канала\n\n"+
-						"После этого канал будет добавлен."))
-				return
-			}
-			chatRef = "@" + tail
-		} else {
-			chatRef = raw
+		ref := ParseChatReference(raw)
+		switch ref.Kind {
+		case ChatRefID:
+			chatRef = strconv.FormatInt(ref.ChatID, 10)
+		case ChatRefUsername:
+			chatRef = ref.Username
+			inviteLink = ref.InviteLink
+		default:
+			em := tgbotapi.NewMessage(chatID, FormatChatRefError(ref))
+			em.ReplyMarkup = AdminCancelOnlyKeyboard()
+			bot.Send(em)
+			return
 		}
 	}
 

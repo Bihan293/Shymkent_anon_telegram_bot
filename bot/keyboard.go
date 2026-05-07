@@ -25,6 +25,11 @@ const (
 	BtnAdminReqListChannels = "📋 Список каналов подписки"
 	BtnAdminReqEditMessage  = "✏️ Текст приветствия"
 	BtnAdminReqResetMessage = "♻️ Сбросить текст"
+
+	// Anon-target chat management (where anonymous messages get delivered)
+	BtnAdminAnonTarget      = "📥 Куда отправлять анонимки"
+	BtnAdminAnonTargetSet   = "📌 Указать чат / канал"
+	BtnAdminAnonTargetReset = "♻️ Сбросить (отправлять админу)"
 )
 
 // ── Language selection keyboard (inline) ─────────────────────────────────────
@@ -99,9 +104,34 @@ func AdminPanelKeyboard() tgbotapi.ReplyKeyboardMarkup {
 			tgbotapi.NewKeyboardButton(BtnAdminRequiredSubs),
 		),
 		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminAnonTarget),
+		),
+		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(BtnAdminBack),
 		),
 	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+// AdminAnonTargetKeyboard — manage where anonymous messages are delivered.
+// hasTarget controls whether the reset button is shown.
+func AdminAnonTargetKeyboard(hasTarget bool) tgbotapi.ReplyKeyboardMarkup {
+	rows := [][]tgbotapi.KeyboardButton{
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminAnonTargetSet),
+		),
+	}
+	if hasTarget {
+		rows = append(rows, tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(BtnAdminAnonTargetReset),
+		))
+	}
+	rows = append(rows, tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton(BtnAdminBack),
+	))
+
+	kb := tgbotapi.NewReplyKeyboard(rows...)
 	kb.ResizeKeyboard = true
 	return kb
 }

@@ -155,10 +155,24 @@ func HandleAddChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	} else {
 		raw := strings.TrimSpace(message.Text)
 		if raw == "" {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Перешлите пост из канала или отправьте @username / ID."))
+			msg := tgbotapi.NewMessage(chatID, "⚠️ Перешлите пост из канала, отправьте ссылку, @username или ID.")
+			msg.ReplyMarkup = AdminCancelOnlyKeyboard()
+			bot.Send(msg)
 			return
 		}
-		chatRef = raw
+
+		ref := ParseChatReference(raw)
+		switch ref.Kind {
+		case ChatRefID:
+			chatRef = strconv.FormatInt(ref.ChatID, 10)
+		case ChatRefUsername:
+			chatRef = ref.Username
+		default:
+			em := tgbotapi.NewMessage(chatID, FormatChatRefError(ref))
+			em.ReplyMarkup = AdminCancelOnlyKeyboard()
+			bot.Send(em)
+			return
+		}
 	}
 
 	wait := tgbotapi.NewMessage(chatID, "⏳ Проверяю канал, подождите...")
