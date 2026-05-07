@@ -914,12 +914,33 @@ func getCooldownRemaining(userID int64) time.Duration {
 	return cooldownDuration - elapsed
 }
 
-// ── Send draft to admin ────────────────────────────────────────────────────
+// ── Send draft to admin (or to configured anon-target chat) ───────────────
 
+// sendDraftToAdmin delivers an anonymous message to the admin's DM by default,
+// or to the chat configured via "📥 Куда отправлять анонимки" (channel/group).
+// If sending to the configured target fails (e.g. the bot was kicked or lost
+// admin rights there), we automatically fall back to the admin's DM so the
+// anonymous message is never lost.
 func sendDraftToAdmin(bot *tgbotapi.BotAPI, draft *DraftMessage, anonNum int) {
 	header := fmt.Sprintf("Анон #%d", anonNum)
 	keyboard := BanKeyboard(anonNum)
 
+	target := AnonDeliveryChatID()
+	if err := deliverDraft(bot, target, draft, header, keyboard); err != nil {
+		log.Printf("anon delivery to %d failed: %v — falling back to admin DM", target, err)
+		if target != adminID {
+			notice := tgbotapi.NewMessage(adminID,
+				fmt.Sprintf("⚠️ Не удалось отправить анонимку в настроенный чат (`%d`): %v\n\nПроверьте права бота. Сообщение пришло сюда вместо целевого чата.", target, err))
+			notice.ParseMode = "Markdown"
+			bot.Send(notice)
+			_ = deliverDraft(bot, adminID, draft, header, keyboard)
+		}
+	}
+}
+
+// deliverDraft sends the anonymous message to the given chat id. Returns the
+// last error encountered (if any).
+func deliverDraft(bot *tgbotapi.BotAPI, chatID int64, draft *DraftMessage, header string, keyboard tgbotapi.InlineKeyboardMarkup) error {
 	totalMedia := len(draft.PhotoIDs) + len(draft.VideoIDs)
 
 	// Album
@@ -951,14 +972,17 @@ func sendDraftToAdmin(bot *tgbotapi.BotAPI, draft *DraftMessage, anonNum int) {
 			mediaGroup = append(mediaGroup, item)
 		}
 
-		mg := tgbotapi.NewMediaGroup(adminID, mediaGroup)
-		bot.Send(mg)
+		mg := tgbotapi.NewMediaGroup(chatID, mediaGroup)
+		if _, err := bot.SendMediaGroup(mg); err != nil {
+			return err
+		}
 
-		// Ban keyboard as separate message
-		btnMsg := tgbotapi.NewMessage(adminID, header)
+		btnMsg := tgbotapi.NewMessage(chatID, header)
 		btnMsg.ReplyMarkup = keyboard
-		bot.Send(btnMsg)
-		return
+		if _, err := bot.Send(btnMsg); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	// Single photo
@@ -967,11 +991,11 @@ func sendDraftToAdmin(bot *tgbotapi.BotAPI, draft *DraftMessage, anonNum int) {
 		if draft.Text != "" {
 			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
 		}
-		ph := tgbotapi.NewPhoto(adminID, tgbotapi.FileID(draft.PhotoIDs[0]))
+		ph := tgbotapi.NewPhoto(chatID, tgbotapi.FileID(draft.PhotoIDs[0]))
 		ph.Caption = caption
 		ph.ReplyMarkup = keyboard
-		bot.Send(ph)
-		return
+		_, err := bot.Send(ph)
+		return err
 	}
 
 	// Single video
@@ -980,16 +1004,17 @@ func sendDraftToAdmin(bot *tgbotapi.BotAPI, draft *DraftMessage, anonNum int) {
 		if draft.Text != "" {
 			caption = fmt.Sprintf("%s\n\n%s", header, draft.Text)
 		}
-		v := tgbotapi.NewVideo(adminID, tgbotapi.FileID(draft.VideoIDs[0]))
+		v := tgbotapi.NewVideo(chatID, tgbotapi.FileID(draft.VideoIDs[0]))
 		v.Caption = caption
 		v.ReplyMarkup = keyboard
-		bot.Send(v)
-		return
+		_, err := bot.Send(v)
+		return err
 	}
 
 	// Text only
 	text := fmt.Sprintf("%s\n\n%s", header, draft.Text)
-	msg := tgbotapi.NewMessage(adminID, text)
+	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = keyboard
-	bot.Send(msg)
+	_, err := bot.Send(msg)
+	return err
 }

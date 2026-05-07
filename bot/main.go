@@ -147,7 +147,7 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		if handleAdminPanelButton(bot, message) {
 			return
 		}
-		// Admin in a multi-step state (broadcast/reply/required-subs) — route to that handler
+		// Admin in a multi-step state (broadcast/reply/required-subs/anon-target) — route to that handler
 		state := getState(adminID)
 		if state == StateAdminReqChanAdd {
 			HandleAddRequiredChannelInput(bot, message)
@@ -155,6 +155,10 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		}
 		if state == StateAdminReqChanEditMsg {
 			HandleEditSubscribeMessageInput(bot, message)
+			return
+		}
+		if state == StateAdminAnonTargetSet {
+			HandleSetAnonTargetInput(bot, message)
 			return
 		}
 		if IsBroadcastState(state) {
@@ -320,8 +324,26 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 		return true
 
 	case BtnAdminRequiredSubs:
+		// Always reset any prior in-flight state so the menu opens cleanly.
+		setState(adminID, StateIdle)
+		deleteBroadcastDraft()
 		setAdminMenu("reqsubs")
 		OpenRequiredSubsMenu(bot, chatID)
+		return true
+
+	case BtnAdminAnonTarget:
+		setState(adminID, StateIdle)
+		deleteBroadcastDraft()
+		setAdminMenu("anontarget")
+		OpenAnonTargetMenu(bot, chatID)
+		return true
+
+	case BtnAdminAnonTargetSet:
+		PromptSetAnonTarget(bot, chatID)
+		return true
+
+	case BtnAdminAnonTargetReset:
+		ResetAnonTarget(bot, chatID)
 		return true
 
 	case BtnAdminReqAddChannel:
@@ -343,13 +365,13 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 	case BtnAdminBack:
 		// Context-dependent back:
 		// • from admin panel main → return to user-style main menu
-		// • from sub-menus (broadcast, reqsubs) → return to admin panel
+		// • from sub-menus (broadcast, reqsubs, anontarget) → return to admin panel
 		deleteBroadcastDraft()
 		setState(adminID, StateIdle)
 		switch getAdminMenu() {
 		case "panel":
 			returnToAdminMain(bot, chatID)
-		case "broadcast", "reqsubs":
+		case "broadcast", "reqsubs", "anontarget":
 			openAdminPanel(bot, chatID)
 		default:
 			returnToAdminMain(bot, chatID)
@@ -360,7 +382,8 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 		// Cancel any in-progress admin operation
 		state := getState(adminID)
 		if IsBroadcastState(state) || state == StateAdminReplyContent || state == StateAdminReplyConfirm ||
-			state == StateAdminReqChanAdd || state == StateAdminReqChanEditMsg {
+			state == StateAdminReqChanAdd || state == StateAdminReqChanEditMsg ||
+			state == StateAdminAnonTargetSet {
 			deleteBroadcastDraft()
 			deleteAdminReplyDraft()
 			setState(adminID, StateIdle)

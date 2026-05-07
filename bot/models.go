@@ -27,6 +27,9 @@ const (
 	// Admin states for managing mandatory subscription channels
 	StateAdminReqChanAdd     = "ADMIN_REQCHAN_ADD"
 	StateAdminReqChanEditMsg = "ADMIN_REQCHAN_EDITMSG"
+
+	// Admin state for configuring anon-target chat (where anonymous messages are forwarded)
+	StateAdminAnonTargetSet = "ADMIN_ANON_TARGET_SET"
 )
 
 // Message content limits
@@ -38,7 +41,9 @@ const (
 
 // Settings keys (stored in DB).
 const (
-	SettingSubscribeMessage = "subscribe_message" // custom welcome/prompt text shown when user must subscribe
+	SettingSubscribeMessage = "subscribe_message"   // custom welcome/prompt text shown when user must subscribe
+	SettingAnonTargetChatID = "anon_target_chat_id" // optional channel/chat id where anonymous messages are delivered (instead of admin DM)
+	SettingAnonTargetTitle  = "anon_target_title"   // human-readable title of the anon-target chat
 )
 
 type Message struct {
