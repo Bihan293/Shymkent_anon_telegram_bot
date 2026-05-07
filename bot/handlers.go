@@ -531,43 +531,53 @@ func HandleStatistics(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		return
 	}
 
-	totalUsers, _ := GetTotalUsers()
+	totalUsers, _ := GetTotalUsers()        // ALL users in `users` table (broadcast audience)
+	anonAuthors, _ := GetTotalAnonAuthors() // Unique users who sent anonymous messages
+	todayNew, _ := GetTodayNewUsers()       // Users joined today
+	activeToday, _ := GetActiveUsersToday() // Users seen today (last_seen)
 	totalMessages, _ := GetTotalMessages()
 	totalBans, _ := GetTotalBans()
 	todayMessages, _ := GetTodayMessages()
-	todayUsers, _ := GetTodayUsers()
+	todayMsgUsers, _ := GetTodayUsers()
 	weekMessages, _ := GetWeekMessages()
 
 	text := fmt.Sprintf(
-		"📊 *Статистика бота*\n\n"+
-			"👥 Всего пользователей: *%d*\n"+
-			"📨 Всего сообщений: *%d*\n"+
-			"🚫 Забанено: *%d*\n\n"+
-			"📅 *Сегодня:*\n"+
-			"   📨 Сообщений: *%d*\n"+
-			"   👥 Активных пользователей: *%d*\n\n"+
-			"📆 *За неделю:*\n"+
-			"   📨 Сообщений: *%d*\n",
+		"📊 *Статистика бота*\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n\n"+
+			"👥 *Пользователи*\n"+
+			"   Всего в боте: *%d*\n"+
+			"   Отправляли анонимки: *%d*\n"+
+			"   Активны сегодня: *%d*\n"+
+			"   Новых сегодня: *%d*\n\n"+
+			"📨 *Сообщения*\n"+
+			"   Всего отправлено: *%d*\n"+
+			"   Сегодня: *%d* (от *%d* чел.)\n"+
+			"   За неделю: *%d*\n\n"+
+			"🚫 *Забанено:* %d\n",
 		totalUsers,
+		anonAuthors,
+		activeToday,
+		todayNew,
 		totalMessages,
-		totalBans,
 		todayMessages,
-		todayUsers,
+		todayMsgUsers,
 		weekMessages,
+		totalBans,
 	)
 
 	topUserID, topCount, err := GetTopUser()
 	if err == nil && topUserID != 0 {
-		text += fmt.Sprintf("\n🏆 *Топ отправитель:*\n   🆔 %d — %d сообщений\n", topUserID, topCount)
+		text += fmt.Sprintf("\n🏆 *Топ отправитель:*\n   🆔 `%d` — %d сообщений\n", topUserID, topCount)
 	}
 
 	lastTime, err := GetLastMessageTime()
 	if err == nil && lastTime != nil {
-		text += fmt.Sprintf("\n🕐 Последнее сообщение: %s", lastTime.Format("02.01.2006 15:04"))
+		text += fmt.Sprintf("\n🕐 Последнее сообщение:\n   %s", lastTime.Format("02.01.2006 15:04"))
 	}
 
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
 	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = AdminPanelKeyboard()
 	bot.Send(msg)
 }
 

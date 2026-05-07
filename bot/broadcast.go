@@ -47,17 +47,21 @@ func StartBroadcastUsers(bot *tgbotapi.BotAPI, chatID int64) {
 	setBroadcastDraft(&BroadcastDraft{Target: BroadcastUsers})
 	setState(adminID, StateAdminBcastUsersContent)
 
-	text := "✍️ *Рассылка по пользователям бота*\n\n" +
-		"Отправьте сообщение, которое нужно разослать.\n\n" +
-		"Можно отправить:\n" +
+	count, _ := GetUsersCount()
+
+	text := "✍️ *Рассылка по пользователям бота*\n" +
+		"━━━━━━━━━━━━━━━━━━━━\n\n" +
+		fmt.Sprintf("👥 Получателей: *%d*\n\n", count) +
+		"📤 *Отправьте сообщение для рассылки:*\n" +
 		"• Текст\n" +
 		"• Фото (до 8 шт.)\n" +
 		"• Видео (до 3 шт.)\n" +
-		"• Альбом (фото+видео) с подписью\n\n" +
-		"После — нажмите *«👁 Предпросмотр»* чтобы продолжить."
+		"• Альбом с подписью\n\n" +
+		"💡 _Как только вы пришлёте контент — сразу появится предпросмотр и кнопки подтверждения._\n\n" +
+		"❌ Чтобы отменить — нажмите кнопку ниже."
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = AdminComposeKeyboard()
+	msg.ReplyMarkup = AdminCancelOnlyKeyboard()
 	bot.Send(msg)
 }
 
@@ -65,11 +69,12 @@ func StartBroadcastUsers(bot *tgbotapi.BotAPI, chatID int64) {
 func StartBroadcastChannel(bot *tgbotapi.BotAPI, chatID int64) {
 	channels, _ := ListChannels()
 
-	header := "📢 *Рассылка в канал*\n\n"
+	header := "📢 *Рассылка в канал*\n" +
+		"━━━━━━━━━━━━━━━━━━━━\n\n"
 	if len(channels) == 0 {
-		header += "У вас пока нет добавленных каналов.\nНажмите *«➕ Добавить канал»*, чтобы начать."
+		header += "📭 У вас пока нет добавленных каналов.\n\nНажмите *«➕ Добавить канал»*, чтобы начать."
 	} else {
-		header += fmt.Sprintf("Сохранено каналов: *%d*.\n\nНиже выберите канал для рассылки или управляйте списком через меню:", len(channels))
+		header += fmt.Sprintf("📡 Сохранено каналов: *%d*\n\nВыберите канал для рассылки или управляйте списком через меню ниже.", len(channels))
 	}
 
 	msg := tgbotapi.NewMessage(chatID, header)
@@ -78,7 +83,8 @@ func StartBroadcastChannel(bot *tgbotapi.BotAPI, chatID int64) {
 	bot.Send(msg)
 
 	if len(channels) > 0 {
-		pickMsg := tgbotapi.NewMessage(chatID, "👇 Выберите канал для рассылки:")
+		pickMsg := tgbotapi.NewMessage(chatID, "👇 *Выберите канал для рассылки:*")
+		pickMsg.ParseMode = "Markdown"
 		pickMsg.ReplyMarkup = ChannelsListKeyboard(channels, "chan_select")
 		bot.Send(pickMsg)
 	}
@@ -87,11 +93,14 @@ func StartBroadcastChannel(bot *tgbotapi.BotAPI, chatID int64) {
 // PromptAddChannel asks the admin to send a channel @username or id.
 func PromptAddChannel(bot *tgbotapi.BotAPI, chatID int64) {
 	setState(adminID, StateAdminBcastChanTarget)
-	text := "➕ *Добавление канала*\n\n" +
-		"Перешлите любое сообщение из канала, ИЛИ отправьте:\n" +
-		"• `@username_канала`\n" +
-		"• ID канала (например `-1001234567890`)\n\n" +
-		"⚠️ Бот должен быть *администратором* канала и иметь право публиковать сообщения."
+	text := "➕ *Добавление канала для рассылки*\n" +
+		"━━━━━━━━━━━━━━━━━━━━\n\n" +
+		"Отправьте канал одним из способов:\n\n" +
+		"📨 *Перешлите* любой пост из канала (рекомендуется)\n" +
+		"💬 Отправьте `@username_канала`\n" +
+		"🆔 Отправьте ID: `-1001234567890`\n\n" +
+		"⚠️ *Важно:* бот должен быть админом канала с правом публикации.\n\n" +
+		"❌ Чтобы отменить — нажмите кнопку ниже."
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminCancelOnlyKeyboard()
@@ -107,20 +116,24 @@ func ShowChannelsList(bot *tgbotapi.BotAPI, chatID int64) {
 		return
 	}
 	if len(channels) == 0 {
-		bot.Send(tgbotapi.NewMessage(chatID, "📭 Список каналов пуст."))
+		msg := tgbotapi.NewMessage(chatID, "📭 *Список каналов пуст.*")
+		msg.ParseMode = "Markdown"
+		msg.ReplyMarkup = AdminChannelMenuKeyboard()
+		bot.Send(msg)
 		return
 	}
 
 	var sb strings.Builder
-	sb.WriteString("📋 *Список каналов:*\n\n")
+	sb.WriteString("📋 *Список каналов*\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 	for i, c := range channels {
 		title := c.Title
 		if title == "" {
 			title = "(без названия)"
 		}
-		sb.WriteString(fmt.Sprintf("%d. *%s*\n   `%s`\n\n", i+1, title, c.ChatID))
+		sb.WriteString(fmt.Sprintf("`%d.` *%s*\n   ID: `%s`\n\n", i+1, title, c.ChatID))
 	}
-	sb.WriteString("Нажмите на канал чтобы удалить его:")
+	sb.WriteString("👇 Нажмите 🗑 чтобы удалить канал:")
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "Markdown"
@@ -129,28 +142,34 @@ func ShowChannelsList(bot *tgbotapi.BotAPI, chatID int64) {
 }
 
 // HandleAddChannelInput processes admin's input when adding a channel.
+// Async: validates Telegram chat in goroutine so webhook never hangs.
 func HandleAddChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	chatID := message.Chat.ID
 
 	var chatRef string
 	var title string
 
-	// 1. forwarded from channel
 	if message.ForwardFromChat != nil && message.ForwardFromChat.IsChannel() {
 		chatRef = strconv.FormatInt(message.ForwardFromChat.ID, 10)
 		title = message.ForwardFromChat.Title
 	} else {
-		// 2. text input — @username or numeric id
 		raw := strings.TrimSpace(message.Text)
 		if raw == "" {
-			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Перешлите сообщение из канала или отправьте @username / id."))
+			bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Перешлите пост из канала или отправьте @username / ID."))
 			return
 		}
 		chatRef = raw
-		// will resolve below
 	}
 
-	// Try to fetch chat info from Telegram to validate + get a nicer title
+	wait := tgbotapi.NewMessage(chatID, "⏳ Проверяю канал, подождите...")
+	waitSent, _ := bot.Send(wait)
+
+	go func() {
+		resolveAndSaveBroadcastChannel(bot, chatID, waitSent.MessageID, chatRef, title)
+	}()
+}
+
+func resolveAndSaveBroadcastChannel(bot *tgbotapi.BotAPI, chatID int64, waitMsgID int, chatRef, title string) {
 	var chatCfg tgbotapi.ChatInfoConfig
 	if id, err := strconv.ParseInt(chatRef, 10, 64); err == nil {
 		chatCfg = tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: id}}
@@ -163,18 +182,27 @@ func HandleAddChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	}
 
 	chatInfo, err := bot.GetChat(chatCfg)
+
+	if waitMsgID != 0 {
+		del := tgbotapi.NewDeleteMessage(chatID, waitMsgID)
+		bot.Request(del)
+	}
+
 	if err != nil {
 		log.Printf("GetChat error for %s: %v", chatRef, err)
-		bot.Send(tgbotapi.NewMessage(chatID,
-			"❌ Не удалось получить информацию о канале.\n"+
-				"Убедитесь, что:\n"+
-				"• Канал существует и публичный (или бот добавлен в него)\n"+
-				"• Бот *администратор* канала\n\n"+
-				"Попробуйте снова или нажмите ❌ Отменить."))
+		errMsg := tgbotapi.NewMessage(chatID,
+			"❌ *Не удалось получить информацию о канале.*\n\n"+
+				"Возможные причины:\n"+
+				"• Канал не существует\n"+
+				"• Бот не добавлен в канал как админ\n"+
+				"• Неверный ID/username\n\n"+
+				"Попробуйте снова или нажмите ❌ Отменить.")
+		errMsg.ParseMode = "Markdown"
+		errMsg.ReplyMarkup = AdminCancelOnlyKeyboard()
+		bot.Send(errMsg)
 		return
 	}
 
-	// Always store as numeric id (most reliable for posting later)
 	storeChatID := strconv.FormatInt(chatInfo.ID, 10)
 	if title == "" {
 		title = chatInfo.Title
@@ -189,7 +217,7 @@ func HandleAddChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	setState(adminID, StateIdle)
 
 	doneMsg := tgbotapi.NewMessage(chatID,
-		fmt.Sprintf("✅ Канал добавлен:\n*%s*\n`%s`", title, storeChatID))
+		fmt.Sprintf("✅ *Канал добавлен!*\n\n📡 *%s*\n🆔 `%s`", title, storeChatID))
 	doneMsg.ParseMode = "Markdown"
 	doneMsg.ReplyMarkup = AdminChannelMenuKeyboard()
 	bot.Send(doneMsg)
@@ -197,7 +225,8 @@ func HandleAddChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 
 // ── Composition: collecting media/text ────────────────────────────────────
 
-// HandleBroadcastContent collects content for a broadcast draft.
+// HandleBroadcastContent collects content for a broadcast draft and IMMEDIATELY
+// shows preview + buttons-question (no manual "Preview" button needed).
 func HandleBroadcastContent(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	draft := getBroadcastDraft()
 	if draft == nil {
@@ -205,7 +234,7 @@ func HandleBroadcastContent(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		return
 	}
 
-	// media group: buffer & merge
+	// media group: buffer & merge — preview will be triggered after timer fires
 	if message.MediaGroupID != "" {
 		handleBroadcastMediaGroup(bot, message)
 		return
@@ -225,14 +254,17 @@ func HandleBroadcastContent(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		draft.Text = message.Text
 	}
 
+	// must have content
+	if draft.Text == "" && len(draft.PhotoIDs) == 0 && len(draft.VideoIDs) == 0 {
+		bot.Send(tgbotapi.NewMessage(message.Chat.ID,
+			"⚠️ Пустое сообщение. Отправьте текст, фото или видео."))
+		return
+	}
+
 	setBroadcastDraft(draft)
 
-	// hint that content was added
-	hint := "✅ Контент добавлен. Можно отправить ещё медиа/текст или нажать *«👁 Предпросмотр»*."
-	hintMsg := tgbotapi.NewMessage(message.Chat.ID, hint)
-	hintMsg.ParseMode = "Markdown"
-	hintMsg.ReplyMarkup = AdminComposeKeyboard()
-	bot.Send(hintMsg)
+	// Auto-advance to buttons step
+	AskForButtons(bot, message.Chat.ID)
 }
 
 func handleBroadcastMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
@@ -269,16 +301,14 @@ func handleBroadcastMediaGroup(bot *tgbotapi.BotAPI, message *tgbotapi.Message) 
 		}
 		setBroadcastDraft(draft)
 
-		hintMsg := tgbotapi.NewMessage(chatID,
-			"✅ Альбом добавлен. Можно отправить ещё медиа/текст или нажать *«👁 Предпросмотр»*.")
-		hintMsg.ParseMode = "Markdown"
-		hintMsg.ReplyMarkup = AdminComposeKeyboard()
-		bot.Send(hintMsg)
+		// Auto-advance to buttons step
+		AskForButtons(bot, chatID)
 	})
 	bcastMediaMu.Unlock()
 }
 
 // AskForButtons prompts admin to add inline buttons or skip.
+// Sends preview FIRST so admin sees what they're sending, then asks about buttons.
 func AskForButtons(bot *tgbotapi.BotAPI, chatID int64) {
 	state := getState(adminID)
 	switch state {
@@ -288,15 +318,34 @@ func AskForButtons(bot *tgbotapi.BotAPI, chatID int64) {
 		setState(adminID, StateAdminBcastChanButtons)
 	}
 
-	text := "🔘 *Добавление inline-кнопок*\n\n" +
-		"Отправьте кнопки одним сообщением в формате:\n" +
-		"`Текст кнопки - https://example.com`\n\n" +
-		"Каждая кнопка с новой строки. Например:\n" +
+	draft := getBroadcastDraft()
+	if draft == nil {
+		setState(adminID, StateIdle)
+		return
+	}
+
+	// Show preview of the content first
+	previewHeader := tgbotapi.NewMessage(chatID, "👁 *ПРЕДПРОСМОТР СООБЩЕНИЯ*\n━━━━━━━━━━━━━━━━━━━━")
+	previewHeader.ParseMode = "Markdown"
+	bot.Send(previewHeader)
+
+	// Send the actual content as it will look (without buttons yet)
+	sendBroadcastContent(bot, chatID, draft, nil)
+
+	text := "🔘 *Шаг 2: добавить кнопки?*\n" +
+		"━━━━━━━━━━━━━━━━━━━━\n\n" +
+		"Если хотите добавить кнопки-ссылки под сообщением — отправьте их в формате:\n\n" +
 		"```\n" +
-		"Наш канал - https://t.me/Kazakhstan_anon\n" +
-		"Сайт - https://example.com\n" +
+		"Название | https://ссылка\n" +
+		"Ещё кнопка | https://example.com\n" +
 		"```\n\n" +
-		"Или нажмите *«🚫 Без кнопок»*, чтобы пропустить."
+		"📌 *Правила:*\n" +
+		"• Каждая кнопка с новой строки\n" +
+		"• Разделитель: символ `|` (вертикальная черта)\n" +
+		"• Ссылка должна начинаться с `http://`, `https://` или `tg://`\n" +
+		"• Максимум 10 кнопок\n\n" +
+		"💡 _Старый формат `Текст - https://...` тоже поддерживается._\n\n" +
+		"👇 Или нажмите *«🚫 Без кнопок»* чтобы пропустить."
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminButtonsStepKeyboard()
@@ -322,7 +371,7 @@ func HandleButtonsInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) bool {
 	buttons, err := parseButtonsInput(text)
 	if err != nil {
 		bot.Send(tgbotapi.NewMessage(message.Chat.ID,
-			"❌ "+err.Error()+"\n\nПопробуйте снова или нажмите 🚫 Без кнопок."))
+			"❌ "+err.Error()+"\n\nПримеры правильного формата:\n```\nНаш канал | https://t.me/channel\nСайт | https://example.com\n```\n\nПопробуйте снова или нажмите 🚫 Без кнопок."))
 		return false
 	}
 	draft.Buttons = buttons
@@ -330,7 +379,11 @@ func HandleButtonsInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) bool {
 	return true
 }
 
-// parseButtonsInput parses lines of "Text - https://url" into InlineButton list.
+// parseButtonsInput parses lines like:
+//   "Text | https://url"   (preferred)
+//   "Text - https://url"   (legacy)
+//   "Text — https://url"   (em dash)
+// into an InlineButton list.
 func parseButtonsInput(input string) ([]InlineButton, error) {
 	lines := strings.Split(input, "\n")
 	var out []InlineButton
@@ -339,17 +392,28 @@ func parseButtonsInput(input string) ([]InlineButton, error) {
 		if ln == "" {
 			continue
 		}
-		// split on " - " (space dash space) — safer than just "-"
-		idx := strings.LastIndex(ln, " - ")
-		if idx == -1 {
-			// try " — " (em dash) or just "-"
-			idx = strings.LastIndex(ln, " — ")
-			if idx == -1 {
-				return nil, fmt.Errorf("неверный формат строки: %q. Используйте `Текст - https://url`", ln)
-			}
+
+		var name, url string
+		var found bool
+
+		// Preferred: "Text | URL"
+		if i := strings.LastIndex(ln, "|"); i >= 0 {
+			name = strings.TrimSpace(ln[:i])
+			url = strings.TrimSpace(ln[i+1:])
+			found = true
+		} else if i := strings.LastIndex(ln, " - "); i >= 0 {
+			name = strings.TrimSpace(ln[:i])
+			url = strings.TrimSpace(ln[i+3:])
+			found = true
+		} else if i := strings.LastIndex(ln, " — "); i >= 0 {
+			name = strings.TrimSpace(ln[:i])
+			url = strings.TrimSpace(ln[i+len(" — "):])
+			found = true
 		}
-		name := strings.TrimSpace(ln[:idx])
-		url := strings.TrimSpace(ln[idx+3:])
+
+		if !found {
+			return nil, fmt.Errorf("неверный формат строки: %q. Используйте `Текст | https://url`", ln)
+		}
 		if name == "" || url == "" {
 			return nil, fmt.Errorf("пустой текст или ссылка в строке: %q", ln)
 		}
@@ -369,7 +433,7 @@ func parseButtonsInput(input string) ([]InlineButton, error) {
 
 // ── Preview ────────────────────────────────────────────────────────────────
 
-// SendBroadcastPreview shows admin a preview of the broadcast and a confirm keyboard.
+// SendBroadcastPreview shows admin a final preview with confirm/cancel inline keyboard.
 func SendBroadcastPreview(bot *tgbotapi.BotAPI, chatID int64) {
 	draft := getBroadcastDraft()
 	if draft == nil {
@@ -383,7 +447,6 @@ func SendBroadcastPreview(bot *tgbotapi.BotAPI, chatID int64) {
 		return
 	}
 
-	// Validate limits
 	if len(draft.PhotoIDs) > MaxPhotos {
 		bot.Send(tgbotapi.NewMessage(chatID,
 			fmt.Sprintf("⚠️ Слишком много фото. Максимум: %d.", MaxPhotos)))
@@ -395,12 +458,17 @@ func SendBroadcastPreview(bot *tgbotapi.BotAPI, chatID int64) {
 		return
 	}
 
-	header := "👁 *ПРЕДПРОСМОТР РАССЫЛКИ*"
+	header := "👁 *ФИНАЛЬНЫЙ ПРЕДПРОСМОТР*\n━━━━━━━━━━━━━━━━━━━━\n"
 	if draft.Target == BroadcastUsers {
 		count, _ := GetUsersCount()
-		header += fmt.Sprintf("\nЦель: пользователи бота (≈ %d чел.)", count)
+		header += fmt.Sprintf("🎯 Цель: пользователи бота\n👥 Получателей: *%d*\n", count)
 	} else {
-		header += fmt.Sprintf("\nЦель: канал `%s`", draft.ChannelID)
+		header += fmt.Sprintf("🎯 Цель: канал `%s`\n", draft.ChannelID)
+	}
+	if len(draft.Buttons) > 0 {
+		header += fmt.Sprintf("🔘 Кнопок: *%d*\n", len(draft.Buttons))
+	} else {
+		header += "🔘 Кнопок: нет\n"
 	}
 
 	intro := tgbotapi.NewMessage(chatID, header)
@@ -411,25 +479,22 @@ func SendBroadcastPreview(bot *tgbotapi.BotAPI, chatID int64) {
 	inlineKB := BuildBroadcastInlineKeyboard(draft.Buttons)
 	sendBroadcastContent(bot, chatID, draft, inlineKB)
 
-	// Now ask for confirmation via inline buttons
 	if draft.Target == BroadcastUsers {
 		setState(adminID, StateAdminBcastUsersConfirm)
 	} else {
 		setState(adminID, StateAdminBcastChanConfirm)
 	}
 
-	confirmMsg := tgbotapi.NewMessage(chatID, "Запустить рассылку?")
+	confirmMsg := tgbotapi.NewMessage(chatID, "🚀 *Запустить рассылку?*")
+	confirmMsg.ParseMode = "Markdown"
 	confirmMsg.ReplyMarkup = ConfirmBroadcastKeyboard()
 	bot.Send(confirmMsg)
 }
 
-// sendBroadcastContent sends the broadcast content to a single chat (preview or real recipient).
+// sendBroadcastContent sends the broadcast content to a single chat.
 func sendBroadcastContent(bot *tgbotapi.BotAPI, chatID int64, draft *BroadcastDraft, replyMarkup *tgbotapi.InlineKeyboardMarkup) error {
 	totalMedia := len(draft.PhotoIDs) + len(draft.VideoIDs)
 
-	// Album: telegram media-groups don't support inline reply markup,
-	// so we send the album first (without buttons), then a follow-up text
-	// message with the inline keyboard if there are buttons.
 	if totalMedia > 1 {
 		var mediaGroup []interface{}
 		first := true
@@ -469,7 +534,6 @@ func sendBroadcastContent(bot *tgbotapi.BotAPI, chatID int64, draft *BroadcastDr
 		return nil
 	}
 
-	// Single photo
 	if len(draft.PhotoIDs) == 1 {
 		ph := tgbotapi.NewPhoto(chatID, tgbotapi.FileID(draft.PhotoIDs[0]))
 		if draft.Text != "" {
@@ -482,7 +546,6 @@ func sendBroadcastContent(bot *tgbotapi.BotAPI, chatID int64, draft *BroadcastDr
 		return err
 	}
 
-	// Single video
 	if len(draft.VideoIDs) == 1 {
 		v := tgbotapi.NewVideo(chatID, tgbotapi.FileID(draft.VideoIDs[0]))
 		if draft.Text != "" {
@@ -495,7 +558,6 @@ func sendBroadcastContent(bot *tgbotapi.BotAPI, chatID int64, draft *BroadcastDr
 		return err
 	}
 
-	// Text only
 	if draft.Text == "" {
 		return fmt.Errorf("empty broadcast")
 	}
@@ -517,13 +579,13 @@ func ExecuteBroadcast(bot *tgbotapi.BotAPI, chatID int64) {
 		return
 	}
 
-	// Capture local copy because we'll reset draft after launching
 	d := *draft
 	deleteBroadcastDraft()
 	setState(adminID, StateIdle)
 
 	go func() {
-		startMsg := tgbotapi.NewMessage(chatID, "🚀 Рассылка запущена...")
+		startMsg := tgbotapi.NewMessage(chatID, "🚀 *Рассылка запущена...*")
+		startMsg.ParseMode = "Markdown"
 		startMsg.ReplyMarkup = AdminPanelKeyboard()
 		bot.Send(startMsg)
 
@@ -552,23 +614,22 @@ func executeBroadcastUsers(bot *tgbotapi.BotAPI, adminChatID int64, d *Broadcast
 
 	var sent, failed int
 	for _, uid := range ids {
-		// Don't broadcast to admin itself (already saw preview)
-		// — actually we keep it, admin is also a user. But we'll send anyway.
 		if err := sendBroadcastContent(bot, uid, d, inlineKB); err != nil {
 			failed++
 			log.Printf("broadcast to %d failed: %v", uid, err)
 		} else {
 			sent++
 		}
-		// Respect Telegram limits ~30 msg/sec — keep it safe at ~25 msg/sec
+		// ~25 msg/sec to be safe under Telegram limits
 		time.Sleep(40 * time.Millisecond)
 	}
 
 	report := fmt.Sprintf(
-		"✅ *Рассылка завершена*\n\n"+
+		"✅ *Рассылка завершена*\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n\n"+
 			"📤 Отправлено: *%d*\n"+
 			"❌ Ошибок: *%d*\n"+
-			"👥 Всего: *%d*",
+			"👥 Всего получателей: *%d*",
 		sent, failed, len(ids),
 	)
 	rep := tgbotapi.NewMessage(adminChatID, report)
@@ -602,7 +663,8 @@ func executeBroadcastChannel(bot *tgbotapi.BotAPI, adminChatID int64, d *Broadca
 		return
 	}
 
-	rep := tgbotapi.NewMessage(adminChatID, "✅ Сообщение отправлено в канал!")
+	rep := tgbotapi.NewMessage(adminChatID, "✅ *Сообщение отправлено в канал!*")
+	rep.ParseMode = "Markdown"
 	rep.ReplyMarkup = AdminPanelKeyboard()
 	bot.Send(rep)
 }

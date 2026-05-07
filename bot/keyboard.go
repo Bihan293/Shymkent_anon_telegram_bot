@@ -17,10 +17,7 @@ const (
 	BtnAdminAddChannel   = "➕ Добавить канал"
 	BtnAdminListChannels = "📋 Список каналов"
 	BtnAdminCancel       = "❌ Отменить"
-	BtnAdminSkip         = "➡️ Пропустить"
-	BtnAdminAddButtons   = "🔘 Добавить кнопки"
 	BtnAdminNoButtons    = "🚫 Без кнопок"
-	BtnAdminPreview      = "👁 Предпросмотр"
 
 	// Mandatory subscription management
 	BtnAdminRequiredSubs    = "🔔 Обязательная подписка"
@@ -178,20 +175,6 @@ func AdminChannelMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
 		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(BtnAdminBack),
-		),
-	)
-	kb.ResizeKeyboard = true
-	return kb
-}
-
-// AdminComposeKeyboard — keyboard while composing broadcast content.
-func AdminComposeKeyboard() tgbotapi.ReplyKeyboardMarkup {
-	kb := tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton(BtnAdminPreview),
-		),
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton(BtnAdminCancel),
 		),
 	)
 	kb.ResizeKeyboard = true
