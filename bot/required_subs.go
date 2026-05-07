@@ -214,7 +214,7 @@ func ShowRequiredChannelsList(bot *tgbotapi.BotAPI, chatID int64) {
 
 // PromptEditSubscribeMessage asks admin for a new welcome/subscribe message text.
 func PromptEditSubscribeMessage(bot *tgbotapi.BotAPI, chatID int64) {
-	setState(adminID, StateAdminReqEditMsg)
+	setState(adminID, StateAdminReqChanEditMsg)
 
 	current, _ := GetSetting(SettingSubscribeMessage)
 

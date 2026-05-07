@@ -72,7 +72,15 @@ func CancelKeyboard(lang string) tgbotapi.ReplyKeyboardMarkup {
 // ── Admin keyboard (main) ───────────────────────────────────────────────────
 
 func AdminKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	// Use Russian labels for the user-facing buttons (admin uses RU by default).
 	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(t(LangRU, "btn_send_anon")),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton(t(LangRU, "btn_help")),
+			tgbotapi.NewKeyboardButton(t(LangRU, "btn_change_lang")),
+		),
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(BtnAdminPanel),
 		),
