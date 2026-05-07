@@ -203,17 +203,18 @@ func handleChannelSelect(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery)
 		title = ch.ChatID
 	}
 	text := fmt.Sprintf(
-		"📢 *Рассылка в канал «%s»*\n\n"+
-			"Отправьте сообщение для публикации.\n\n"+
-			"Можно отправить:\n"+
+		"📢 *Рассылка в канал «%s»*\n"+
+			"━━━━━━━━━━━━━━━━━━━━\n\n"+
+			"📤 *Отправьте сообщение для публикации:*\n"+
 			"• Текст\n"+
 			"• Фото (до 8 шт.)\n"+
 			"• Видео (до 3 шт.)\n"+
 			"• Альбом с подписью\n\n"+
-			"После — нажмите *«👁 Предпросмотр»*.", title)
+			"💡 _Как только пришлёте контент — сразу появится предпросмотр._\n\n"+
+			"❌ Чтобы отменить — нажмите кнопку ниже.", title)
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = AdminComposeKeyboard()
+	msg.ReplyMarkup = AdminCancelOnlyKeyboard()
 	bot.Send(msg)
 
 	answer := tgbotapi.NewCallback(callback.ID, "Канал выбран")

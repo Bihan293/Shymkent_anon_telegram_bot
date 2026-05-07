@@ -12,22 +12,26 @@ import (
 // OpenRequiredSubsMenu shows the mandatory-subscription management menu.
 func OpenRequiredSubsMenu(bot *tgbotapi.BotAPI, chatID int64) {
 	setState(adminID, StateIdle)
+	setAdminMenu("reqsubs")
 
 	channels, _ := ListRequiredChannels()
 	custom, _ := GetSetting(SettingSubscribeMessage)
 
 	var sb strings.Builder
-	sb.WriteString("🔔 *Обязательная подписка*\n\n")
+	sb.WriteString("🔔 *Обязательная подписка*\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
+
 	if len(channels) == 0 {
-		sb.WriteString("📭 Сейчас обязательной подписки *НЕТ*. Пользователи могут пользоваться ботом свободно.\n\n")
+		sb.WriteString("📭 Каналов нет.\n")
+		sb.WriteString("Подписка *не требуется* — пользователи могут пользоваться ботом свободно.\n\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("📡 Каналов в списке: *%d*\n\n", len(channels)))
+		sb.WriteString(fmt.Sprintf("📡 Активных каналов: *%d*\n\n", len(channels)))
 		for i, c := range channels {
 			title := c.Title
 			if title == "" {
 				title = "(без названия)"
 			}
-			sb.WriteString(fmt.Sprintf("%d. *%s*\n   `%s`\n", i+1, title, c.ChatID))
+			sb.WriteString(fmt.Sprintf("`%d.` *%s*\n   ID: `%s`\n", i+1, title, c.ChatID))
 			if c.InviteLink != "" {
 				sb.WriteString(fmt.Sprintf("   🔗 %s\n", c.InviteLink))
 			}
@@ -37,12 +41,16 @@ func OpenRequiredSubsMenu(bot *tgbotapi.BotAPI, chatID int64) {
 
 	sb.WriteString("✏️ *Текст приветствия:*\n")
 	if strings.TrimSpace(custom) == "" {
-		sb.WriteString("_(используется текст по умолчанию)_\n\n")
+		sb.WriteString("_по умолчанию_\n\n")
 	} else {
-		sb.WriteString(custom + "\n\n")
+		short := custom
+		if len([]rune(short)) > 200 {
+			short = string([]rune(short)[:200]) + "..."
+		}
+		sb.WriteString("```\n" + short + "\n```\n\n")
 	}
 
-	sb.WriteString("Используйте кнопки ниже для управления.")
+	sb.WriteString("👇 Выберите действие:")
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "Markdown"
@@ -53,13 +61,15 @@ func OpenRequiredSubsMenu(bot *tgbotapi.BotAPI, chatID int64) {
 // PromptAddRequiredChannel asks the admin to send a channel @username, id, or forward.
 func PromptAddRequiredChannel(bot *tgbotapi.BotAPI, chatID int64) {
 	setState(adminID, StateAdminReqChanAdd)
-	text := "➕ *Добавление канала обязательной подписки*\n\n" +
-		"Перешлите любое сообщение из канала, ИЛИ отправьте:\n" +
-		"• `@username_канала`\n" +
-		"• ID канала (например `-1001234567890`)\n" +
-		"• Прямую ссылку: `https://t.me/имя_канала` или `https://t.me/+invite_hash`\n\n" +
-		"⚠️ Бот должен быть *администратором* канала, иначе он не сможет проверить подписку пользователей.\n\n" +
-		"Чтобы отменить — нажмите ❌ Отменить."
+	text := "➕ *Добавление канала обязательной подписки*\n" +
+		"━━━━━━━━━━━━━━━━━━━━\n\n" +
+		"Отправьте канал одним из способов:\n\n" +
+		"📨 *Перешлите* любой пост из канала (рекомендуется)\n" +
+		"🔗 Отправьте ссылку: `https://t.me/имя_канала`\n" +
+		"🆔 Отправьте ID: `-1001234567890`\n" +
+		"💬 Отправьте @username канала\n\n" +
+		"⚠️ *Важно:* бот должен быть админом канала, иначе не сможет проверить подписку.\n\n" +
+		"❌ Чтобы отменить — нажмите кнопку ниже."
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminCancelOnlyKeyboard()
@@ -67,6 +77,7 @@ func PromptAddRequiredChannel(bot *tgbotapi.BotAPI, chatID int64) {
 }
 
 // HandleAddRequiredChannelInput processes admin input when adding a required channel.
+// All Telegram API calls are done in a goroutine so the webhook handler never hangs.
 func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	chatID := message.Chat.ID
 
@@ -85,18 +96,16 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 		raw := strings.TrimSpace(message.Text)
 		if raw == "" {
 			bot.Send(tgbotapi.NewMessage(chatID,
-				"⚠️ Перешлите сообщение из канала, отправьте @username, id или ссылку."))
+				"⚠️ Перешлите пост из канала, отправьте ссылку, @username или ID."))
 			return
 		}
 
-		// If user sent a t.me link — extract @username or +invite hash
+		// t.me link
 		if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "t.me/") {
-			// store the link for later
 			inviteLink = raw
-			// pick out the part after t.me/
 			idx := strings.Index(raw, "t.me/")
 			if idx == -1 {
-				bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Не похоже на ссылку Telegram. Используйте https://t.me/имя или https://t.me/+invite."))
+				bot.Send(tgbotapi.NewMessage(chatID, "⚠️ Не похоже на ссылку Telegram."))
 				return
 			}
 			tail := strings.TrimRight(raw[idx+5:], "/")
@@ -105,21 +114,30 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 				return
 			}
 			if strings.HasPrefix(tail, "+") || strings.HasPrefix(tail, "joinchat/") {
-				// Private invite link — we cannot resolve chat id without bot being inside.
 				bot.Send(tgbotapi.NewMessage(chatID,
 					"❌ Это приватная ссылка. Для приватных каналов:\n"+
 						"1) Добавьте бота в канал как админа\n"+
 						"2) Перешлите сюда любой пост из канала\n\n"+
-						"После этого канал будет добавлен и ссылка-приглашение сохранится."))
+						"После этого канал будет добавлен."))
 				return
 			}
-			// public username form
 			chatRef = "@" + tail
 		} else {
 			chatRef = raw
 		}
 	}
 
+	// Immediate feedback so user sees the bot is working
+	wait := tgbotapi.NewMessage(chatID, "⏳ Проверяю канал, подождите...")
+	waitSent, _ := bot.Send(wait)
+
+	// Run the slow Telegram API call asynchronously so the webhook returns instantly
+	go func() {
+		resolveAndSaveRequiredChannel(bot, chatID, waitSent.MessageID, chatRef, title, inviteLink)
+	}()
+}
+
+func resolveAndSaveRequiredChannel(bot *tgbotapi.BotAPI, chatID int64, waitMsgID int, chatRef, title, inviteLink string) {
 	// Resolve chat info
 	var chatCfg tgbotapi.ChatInfoConfig
 	if id, err := strconv.ParseInt(chatRef, 10, 64); err == nil {
@@ -133,23 +151,33 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 	}
 
 	chatInfo, err := bot.GetChat(chatCfg)
+
+	// Delete the "checking..." message
+	if waitMsgID != 0 {
+		del := tgbotapi.NewDeleteMessage(chatID, waitMsgID)
+		bot.Request(del)
+	}
+
 	if err != nil {
 		log.Printf("GetChat (required) error for %s: %v", chatRef, err)
-		bot.Send(tgbotapi.NewMessage(chatID,
-			"❌ Не удалось получить информацию о канале.\n"+
-				"Убедитесь, что:\n"+
-				"• Канал существует (для приватного — перешлите пост из него)\n"+
-				"• Бот *администратор* канала (нужно для проверки подписки)\n\n"+
-				"Попробуйте снова или нажмите ❌ Отменить."))
+		errMsg := tgbotapi.NewMessage(chatID,
+			"❌ *Не удалось получить информацию о канале.*\n\n"+
+				"Возможные причины:\n"+
+				"• Канал не существует или приватный\n"+
+				"• Бот не добавлен в канал как админ\n"+
+				"• Неверный ID/ссылка\n\n"+
+				"Для приватного канала — перешлите пост из него.\n\n"+
+				"Попробуйте снова или нажмите ❌ Отменить.")
+		errMsg.ParseMode = "Markdown"
+		errMsg.ReplyMarkup = AdminCancelOnlyKeyboard()
+		bot.Send(errMsg)
 		return
 	}
 
-	// Always store as numeric id (stable for GetChatMember calls).
 	storeChatID := strconv.FormatInt(chatInfo.ID, 10)
 	if title == "" {
 		title = chatInfo.Title
 	}
-	// If we don't have an invite link yet, try to build one from username.
 	if inviteLink == "" && chatInfo.UserName != "" {
 		inviteLink = "https://t.me/" + chatInfo.UserName
 	}
@@ -162,17 +190,20 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 
 	setState(adminID, StateIdle)
 
-	doneText := fmt.Sprintf("✅ Канал добавлен в обязательную подписку:\n*%s*\n`%s`", title, storeChatID)
+	doneText := fmt.Sprintf("✅ *Канал успешно добавлен!*\n\n📡 *%s*\n🆔 `%s`", title, storeChatID)
 	if inviteLink != "" {
 		doneText += "\n🔗 " + inviteLink
 	} else {
-		doneText += "\n\n⚠️ Не удалось определить публичную ссылку. Если канал приватный — перешлите пост из него ещё раз, и я сохраню ссылку-приглашение, либо добавьте её вручную через текст приветствия."
+		doneText += "\n\n⚠️ Ссылка не определена. Если канал приватный — перешлите пост из него ещё раз."
 	}
 
 	doneMsg := tgbotapi.NewMessage(chatID, doneText)
 	doneMsg.ParseMode = "Markdown"
 	doneMsg.ReplyMarkup = AdminRequiredSubsKeyboard()
 	bot.Send(doneMsg)
+
+	// Show updated menu
+	OpenRequiredSubsMenu(bot, chatID)
 }
 
 // ShowRequiredChannelsList shows the list with remove inline buttons.
@@ -185,26 +216,28 @@ func ShowRequiredChannelsList(bot *tgbotapi.BotAPI, chatID int64) {
 	}
 	if len(channels) == 0 {
 		msg := tgbotapi.NewMessage(chatID,
-			"📭 Список каналов обязательной подписки пуст.\n\nДобавьте хотя бы один через ➕ Добавить канал подписки.")
+			"📭 *Список пуст*\n\nДобавьте хотя бы один канал через ➕ *Добавить канал подписки*.")
+		msg.ParseMode = "Markdown"
 		msg.ReplyMarkup = AdminRequiredSubsKeyboard()
 		bot.Send(msg)
 		return
 	}
 
 	var sb strings.Builder
-	sb.WriteString("📋 *Каналы обязательной подписки:*\n\n")
+	sb.WriteString("📋 *Каналы обязательной подписки*\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 	for i, c := range channels {
 		title := c.Title
 		if title == "" {
 			title = "(без названия)"
 		}
-		sb.WriteString(fmt.Sprintf("%d. *%s*\n   `%s`\n", i+1, title, c.ChatID))
+		sb.WriteString(fmt.Sprintf("`%d.` *%s*\n   ID: `%s`\n", i+1, title, c.ChatID))
 		if c.InviteLink != "" {
 			sb.WriteString(fmt.Sprintf("   🔗 %s\n", c.InviteLink))
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("Нажмите на канал, чтобы *удалить* его:")
+	sb.WriteString("👇 Нажмите 🗑 чтобы удалить канал:")
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "Markdown"
@@ -219,19 +252,17 @@ func PromptEditSubscribeMessage(bot *tgbotapi.BotAPI, chatID int64) {
 	current, _ := GetSetting(SettingSubscribeMessage)
 
 	var sb strings.Builder
-	sb.WriteString("✏️ *Изменение текста приветствия*\n\n")
+	sb.WriteString("✏️ *Изменение текста приветствия*\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 	sb.WriteString("Этот текст увидит пользователь, когда у него запросят обязательную подписку.\n\n")
 	if strings.TrimSpace(current) != "" {
-		sb.WriteString("Текущий текст:\n")
-		sb.WriteString("```\n")
-		sb.WriteString(current)
-		sb.WriteString("\n```\n\n")
+		sb.WriteString("📝 *Текущий текст:*\n```\n" + current + "\n```\n\n")
 	} else {
-		sb.WriteString("Сейчас используется текст по умолчанию.\n\n")
+		sb.WriteString("📝 Сейчас используется текст по умолчанию.\n\n")
 	}
-	sb.WriteString("Отправьте новый текст одним сообщением.\n")
-	sb.WriteString("Чтобы отменить — нажмите ❌ Отменить.\n")
-	sb.WriteString("Чтобы сбросить к тексту по умолчанию — отправьте `-`.")
+	sb.WriteString("✉️ Отправьте новый текст одним сообщением.\n")
+	sb.WriteString("♻️ Отправьте `-` чтобы сбросить к тексту по умолчанию.\n")
+	sb.WriteString("❌ Чтобы отменить — нажмите кнопку ниже.")
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
 	msg.ParseMode = "Markdown"
@@ -261,7 +292,8 @@ func HandleEditSubscribeMessageInput(bot *tgbotapi.BotAPI, message *tgbotapi.Mes
 			return
 		}
 		setState(adminID, StateIdle)
-		ok := tgbotapi.NewMessage(chatID, "♻️ Текст приветствия сброшен. Будет использоваться текст по умолчанию.")
+		ok := tgbotapi.NewMessage(chatID, "♻️ *Текст приветствия сброшен.*\nБудет использоваться текст по умолчанию.")
+		ok.ParseMode = "Markdown"
 		ok.ReplyMarkup = AdminRequiredSubsKeyboard()
 		bot.Send(ok)
 		return
@@ -274,7 +306,8 @@ func HandleEditSubscribeMessageInput(bot *tgbotapi.BotAPI, message *tgbotapi.Mes
 	}
 	setState(adminID, StateIdle)
 
-	ok := tgbotapi.NewMessage(chatID, "✅ Текст приветствия обновлён.")
+	ok := tgbotapi.NewMessage(chatID, "✅ *Текст приветствия обновлён.*")
+	ok.ParseMode = "Markdown"
 	ok.ReplyMarkup = AdminRequiredSubsKeyboard()
 	bot.Send(ok)
 }
@@ -286,7 +319,8 @@ func ResetSubscribeMessage(bot *tgbotapi.BotAPI, chatID int64) {
 		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка сброса."))
 		return
 	}
-	msg := tgbotapi.NewMessage(chatID, "♻️ Текст приветствия сброшен. Будет использоваться текст по умолчанию.")
+	msg := tgbotapi.NewMessage(chatID, "♻️ *Текст приветствия сброшен.*\nБудет использоваться текст по умолчанию.")
+	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminRequiredSubsKeyboard()
 	bot.Send(msg)
 }
@@ -321,23 +355,25 @@ func HandleRequiredChannelRemoveCallback(bot *tgbotapi.BotAPI, callback *tgbotap
 	channels, _ := ListRequiredChannels()
 	if len(channels) == 0 {
 		edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID,
-			"📭 Список каналов обязательной подписки пуст.")
+			"📭 *Список каналов обязательной подписки пуст.*")
+		edit.ParseMode = "Markdown"
 		bot.Send(edit)
 	} else {
 		var sb strings.Builder
-		sb.WriteString("📋 *Каналы обязательной подписки:*\n\n")
+		sb.WriteString("📋 *Каналы обязательной подписки*\n")
+		sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 		for i, c := range channels {
 			title := c.Title
 			if title == "" {
 				title = "(без названия)"
 			}
-			sb.WriteString(fmt.Sprintf("%d. *%s*\n   `%s`\n", i+1, title, c.ChatID))
+			sb.WriteString(fmt.Sprintf("`%d.` *%s*\n   ID: `%s`\n", i+1, title, c.ChatID))
 			if c.InviteLink != "" {
 				sb.WriteString(fmt.Sprintf("   🔗 %s\n", c.InviteLink))
 			}
 			sb.WriteString("\n")
 		}
-		sb.WriteString("Нажмите на канал, чтобы *удалить* его:")
+		sb.WriteString("👇 Нажмите 🗑 чтобы удалить канал:")
 
 		kb := RequiredChannelRemoveKeyboard(channels)
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, callback.Message.MessageID,
@@ -346,6 +382,6 @@ func HandleRequiredChannelRemoveCallback(bot *tgbotapi.BotAPI, callback *tgbotap
 		bot.Send(edit)
 	}
 
-	answer := tgbotapi.NewCallback(callback.ID, "Канал удалён")
+	answer := tgbotapi.NewCallback(callback.ID, "✅ Канал удалён")
 	bot.Send(answer)
 }

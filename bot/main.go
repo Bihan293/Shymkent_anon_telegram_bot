@@ -372,15 +372,6 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 		// Otherwise let it fall through — user might be canceling regular flow
 		return false
 
-	case BtnAdminPreview:
-		state := getState(adminID)
-		if state == StateAdminBcastUsersContent || state == StateAdminBcastChanContent {
-			// After content collected → ask for buttons step
-			AskForButtons(bot, chatID)
-			return true
-		}
-		return false
-
 	case BtnAdminNoButtons:
 		state := getState(adminID)
 		if state == StateAdminBcastUsersButtons || state == StateAdminBcastChanButtons {

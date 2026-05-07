@@ -391,11 +391,45 @@ func TodayMessageCount(userID int64) (int, error) {
 
 // ── Statistics functions ──────────────────────────────────────────────────
 
-// GetTotalUsers returns the count of unique users who have sent messages.
+// GetTotalUsers returns the count of ALL users who have ever interacted
+// with the bot (from the `users` table). This matches the broadcast audience.
 func GetTotalUsers() (int, error) {
 	ctx := context.Background()
 	var count int
+	err := db.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
+}
+
+// GetTotalAnonAuthors returns the count of unique users who actually sent
+// at least one anonymous message.
+func GetTotalAnonAuthors() (int, error) {
+	ctx := context.Background()
+	var count int
 	err := db.QueryRow(ctx, `SELECT COUNT(DISTINCT user_id) FROM messages`).Scan(&count)
+	return count, err
+}
+
+// GetTodayNewUsers returns the count of users who joined the bot today.
+func GetTodayNewUsers() (int, error) {
+	ctx := context.Background()
+	today := time.Now().Format("2006-01-02")
+	var count int
+	err := db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM users WHERE created_at::date = $1::date`,
+		today,
+	).Scan(&count)
+	return count, err
+}
+
+// GetActiveUsersToday returns the count of users seen today (last_seen).
+func GetActiveUsersToday() (int, error) {
+	ctx := context.Background()
+	today := time.Now().Format("2006-01-02")
+	var count int
+	err := db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM users WHERE last_seen::date = $1::date`,
+		today,
+	).Scan(&count)
 	return count, err
 }
 
