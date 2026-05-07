@@ -10,28 +10,38 @@ import (
 )
 
 // OpenRequiredSubsMenu shows the mandatory-subscription management menu.
+//
+// IMPORTANT: this menu used to render with ParseMode="Markdown" and embed
+// user-controlled values (channel titles, t.me/some_channel invite links,
+// custom welcome text). Any underscore/asterisk/backtick in those values
+// caused Telegram to reject the whole message with a parse error, so the
+// "🔔 Обязательная подписка" button looked completely dead. The menu now
+// renders as plain text so it can never fail because of bad characters.
 func OpenRequiredSubsMenu(bot *tgbotapi.BotAPI, chatID int64) {
 	setState(adminID, StateIdle)
 	setAdminMenu("reqsubs")
 
-	channels, _ := ListRequiredChannels()
+	channels, err := ListRequiredChannels()
+	if err != nil {
+		log.Printf("OpenRequiredSubsMenu: ListRequiredChannels error: %v", err)
+	}
 	custom, _ := GetSetting(SettingSubscribeMessage)
 
 	var sb strings.Builder
-	sb.WriteString("🔔 *Обязательная подписка*\n")
+	sb.WriteString("🔔 Обязательная подписка\n")
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 
 	if len(channels) == 0 {
 		sb.WriteString("📭 Каналов нет.\n")
-		sb.WriteString("Подписка *не требуется* — пользователи могут пользоваться ботом свободно.\n\n")
+		sb.WriteString("Подписка не требуется — пользователи могут пользоваться ботом свободно.\n\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("📡 Активных каналов: *%d*\n\n", len(channels)))
+		sb.WriteString(fmt.Sprintf("📡 Активных каналов: %d\n\n", len(channels)))
 		for i, c := range channels {
 			title := c.Title
 			if title == "" {
 				title = "(без названия)"
 			}
-			sb.WriteString(fmt.Sprintf("`%d.` *%s*\n   ID: `%s`\n", i+1, title, c.ChatID))
+			sb.WriteString(fmt.Sprintf("%d. %s\n   ID: %s\n", i+1, title, c.ChatID))
 			if c.InviteLink != "" {
 				sb.WriteString(fmt.Sprintf("   🔗 %s\n", c.InviteLink))
 			}
@@ -39,41 +49,40 @@ func OpenRequiredSubsMenu(bot *tgbotapi.BotAPI, chatID int64) {
 		}
 	}
 
-	sb.WriteString("✏️ *Текст приветствия:*\n")
+	sb.WriteString("✏️ Текст приветствия:\n")
 	if strings.TrimSpace(custom) == "" {
-		sb.WriteString("_по умолчанию_\n\n")
+		sb.WriteString("(по умолчанию)\n\n")
 	} else {
 		short := custom
 		if len([]rune(short)) > 200 {
 			short = string([]rune(short)[:200]) + "..."
 		}
-		sb.WriteString("```\n" + short + "\n```\n\n")
+		sb.WriteString(short + "\n\n")
 	}
 
 	sb.WriteString("👇 Выберите действие:")
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
-	msg.ParseMode = "Markdown"
+	// Plain text on purpose — see comment above.
 	msg.ReplyMarkup = AdminRequiredSubsKeyboard()
-	bot.Send(msg)
+	safeSend(bot, msg)
 }
 
 // PromptAddRequiredChannel asks the admin to send a channel @username, id, or forward.
 func PromptAddRequiredChannel(bot *tgbotapi.BotAPI, chatID int64) {
 	setState(adminID, StateAdminReqChanAdd)
-	text := "➕ *Добавление канала обязательной подписки*\n" +
+	text := "➕ Добавление канала обязательной подписки\n" +
 		"━━━━━━━━━━━━━━━━━━━━\n\n" +
 		"Отправьте канал одним из способов:\n\n" +
-		"📨 *Перешлите* любой пост из канала (рекомендуется)\n" +
-		"🔗 Отправьте ссылку: `https://t.me/имя_канала`\n" +
-		"🆔 Отправьте ID: `-1001234567890`\n" +
+		"📨 Перешлите любой пост из канала (рекомендуется)\n" +
+		"🔗 Отправьте ссылку: https://t.me/имя_канала\n" +
+		"🆔 Отправьте ID: -1001234567890\n" +
 		"💬 Отправьте @username канала\n\n" +
-		"⚠️ *Важно:* бот должен быть админом канала, иначе не сможет проверить подписку.\n\n" +
+		"⚠️ Важно: бот должен быть админом канала, иначе не сможет проверить подписку.\n\n" +
 		"❌ Чтобы отменить — нажмите кнопку ниже."
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminCancelOnlyKeyboard()
-	bot.Send(msg)
+	safeSend(bot, msg)
 }
 
 // HandleAddRequiredChannelInput processes admin input when adding a required channel.
@@ -98,7 +107,7 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 			msg := tgbotapi.NewMessage(chatID,
 				"⚠️ Перешлите пост из канала, отправьте ссылку, @username или ID.")
 			msg.ReplyMarkup = AdminCancelOnlyKeyboard()
-			bot.Send(msg)
+			safeSend(bot, msg)
 			return
 		}
 
@@ -112,12 +121,12 @@ func HandleAddRequiredChannelInput(bot *tgbotapi.BotAPI, message *tgbotapi.Messa
 		default:
 			em := tgbotapi.NewMessage(chatID, FormatChatRefError(ref))
 			em.ReplyMarkup = AdminCancelOnlyKeyboard()
-			bot.Send(em)
+			safeSend(bot, em)
 			return
 		}
 	}
 
-	// Immediate feedback so user sees the bot is working
+	// Immediate feedback so the admin sees the bot is working
 	wait := tgbotapi.NewMessage(chatID, "⏳ Проверяю канал, подождите...")
 	waitSent, _ := bot.Send(wait)
 
@@ -145,22 +154,29 @@ func resolveAndSaveRequiredChannel(bot *tgbotapi.BotAPI, chatID int64, waitMsgID
 	// Delete the "checking..." message
 	if waitMsgID != 0 {
 		del := tgbotapi.NewDeleteMessage(chatID, waitMsgID)
-		bot.Request(del)
+		if _, derr := bot.Request(del); derr != nil {
+			log.Printf("delete wait msg failed: %v", derr)
+		}
 	}
 
 	if err != nil {
 		log.Printf("GetChat (required) error for %s: %v", chatRef, err)
+		// IMPORTANT: clear the state on error too, otherwise the admin gets
+		// stuck in StateAdminReqChanAdd and every subsequent message keeps
+		// looping into this handler — which is exactly what the user reported.
+		setState(adminID, StateIdle)
 		errMsg := tgbotapi.NewMessage(chatID,
-			"❌ *Не удалось получить информацию о канале.*\n\n"+
+			"❌ Не удалось получить информацию о канале.\n\n"+
 				"Возможные причины:\n"+
 				"• Канал не существует или приватный\n"+
 				"• Бот не добавлен в канал как админ\n"+
 				"• Неверный ID/ссылка\n\n"+
 				"Для приватного канала — перешлите пост из него.\n\n"+
-				"Попробуйте снова или нажмите ❌ Отменить.")
-		errMsg.ParseMode = "Markdown"
-		errMsg.ReplyMarkup = AdminCancelOnlyKeyboard()
-		bot.Send(errMsg)
+				"Возвращаю в меню обязательной подписки.")
+		errMsg.ReplyMarkup = AdminRequiredSubsKeyboard()
+		safeSend(bot, errMsg)
+		// Show the menu again so admin always has a working keyboard.
+		OpenRequiredSubsMenu(bot, chatID)
 		return
 	}
 
@@ -174,13 +190,20 @@ func resolveAndSaveRequiredChannel(bot *tgbotapi.BotAPI, chatID int64, waitMsgID
 
 	if err := AddRequiredChannel(storeChatID, title, inviteLink); err != nil {
 		log.Printf("AddRequiredChannel error: %v", err)
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка сохранения канала в БД."))
+		setState(adminID, StateIdle)
+		safeSend(bot, tgbotapi.NewMessage(chatID,
+			"❌ Ошибка сохранения канала в БД. Попробуйте ещё раз."))
+		OpenRequiredSubsMenu(bot, chatID)
 		return
 	}
 
 	setState(adminID, StateIdle)
 
-	doneText := fmt.Sprintf("✅ *Канал успешно добавлен!*\n\n📡 *%s*\n🆔 `%s`", title, storeChatID)
+	displayTitle := title
+	if displayTitle == "" {
+		displayTitle = "(без названия)"
+	}
+	doneText := fmt.Sprintf("✅ Канал успешно добавлен!\n\n📡 %s\n🆔 %s", displayTitle, storeChatID)
 	if inviteLink != "" {
 		doneText += "\n🔗 " + inviteLink
 	} else {
@@ -188,9 +211,8 @@ func resolveAndSaveRequiredChannel(bot *tgbotapi.BotAPI, chatID int64, waitMsgID
 	}
 
 	doneMsg := tgbotapi.NewMessage(chatID, doneText)
-	doneMsg.ParseMode = "Markdown"
 	doneMsg.ReplyMarkup = AdminRequiredSubsKeyboard()
-	bot.Send(doneMsg)
+	safeSend(bot, doneMsg)
 
 	// Show updated menu
 	OpenRequiredSubsMenu(bot, chatID)
@@ -201,27 +223,26 @@ func ShowRequiredChannelsList(bot *tgbotapi.BotAPI, chatID int64) {
 	channels, err := ListRequiredChannels()
 	if err != nil {
 		log.Printf("ListRequiredChannels error: %v", err)
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка получения списка каналов."))
+		safeSend(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка получения списка каналов."))
 		return
 	}
 	if len(channels) == 0 {
 		msg := tgbotapi.NewMessage(chatID,
-			"📭 *Список пуст*\n\nДобавьте хотя бы один канал через ➕ *Добавить канал подписки*.")
-		msg.ParseMode = "Markdown"
+			"📭 Список пуст.\n\nДобавьте хотя бы один канал через ➕ Добавить канал подписки.")
 		msg.ReplyMarkup = AdminRequiredSubsKeyboard()
-		bot.Send(msg)
+		safeSend(bot, msg)
 		return
 	}
 
 	var sb strings.Builder
-	sb.WriteString("📋 *Каналы обязательной подписки*\n")
+	sb.WriteString("📋 Каналы обязательной подписки\n")
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 	for i, c := range channels {
 		title := c.Title
 		if title == "" {
 			title = "(без названия)"
 		}
-		sb.WriteString(fmt.Sprintf("`%d.` *%s*\n   ID: `%s`\n", i+1, title, c.ChatID))
+		sb.WriteString(fmt.Sprintf("%d. %s\n   ID: %s\n", i+1, title, c.ChatID))
 		if c.InviteLink != "" {
 			sb.WriteString(fmt.Sprintf("   🔗 %s\n", c.InviteLink))
 		}
@@ -230,9 +251,8 @@ func ShowRequiredChannelsList(bot *tgbotapi.BotAPI, chatID int64) {
 	sb.WriteString("👇 Нажмите 🗑 чтобы удалить канал:")
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
-	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = RequiredChannelRemoveKeyboard(channels)
-	bot.Send(msg)
+	safeSend(bot, msg)
 }
 
 // PromptEditSubscribeMessage asks admin for a new welcome/subscribe message text.
@@ -242,22 +262,21 @@ func PromptEditSubscribeMessage(bot *tgbotapi.BotAPI, chatID int64) {
 	current, _ := GetSetting(SettingSubscribeMessage)
 
 	var sb strings.Builder
-	sb.WriteString("✏️ *Изменение текста приветствия*\n")
+	sb.WriteString("✏️ Изменение текста приветствия\n")
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 	sb.WriteString("Этот текст увидит пользователь, когда у него запросят обязательную подписку.\n\n")
 	if strings.TrimSpace(current) != "" {
-		sb.WriteString("📝 *Текущий текст:*\n```\n" + current + "\n```\n\n")
+		sb.WriteString("📝 Текущий текст:\n" + current + "\n\n")
 	} else {
 		sb.WriteString("📝 Сейчас используется текст по умолчанию.\n\n")
 	}
 	sb.WriteString("✉️ Отправьте новый текст одним сообщением.\n")
-	sb.WriteString("♻️ Отправьте `-` чтобы сбросить к тексту по умолчанию.\n")
+	sb.WriteString("♻️ Отправьте \"-\" чтобы сбросить к тексту по умолчанию.\n")
 	sb.WriteString("❌ Чтобы отменить — нажмите кнопку ниже.")
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
-	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminCancelOnlyKeyboard()
-	bot.Send(msg)
+	safeSend(bot, msg)
 }
 
 // HandleEditSubscribeMessageInput stores the new welcome/subscribe message.
@@ -270,7 +289,7 @@ func HandleEditSubscribeMessageInput(bot *tgbotapi.BotAPI, message *tgbotapi.Mes
 	text = strings.TrimSpace(text)
 
 	if text == "" {
-		bot.Send(tgbotapi.NewMessage(chatID,
+		safeSend(bot, tgbotapi.NewMessage(chatID,
 			"⚠️ Отправьте текстом новое приветствие или нажмите ❌ Отменить."))
 		return
 	}
@@ -278,41 +297,42 @@ func HandleEditSubscribeMessageInput(bot *tgbotapi.BotAPI, message *tgbotapi.Mes
 	if text == "-" {
 		if err := SetSetting(SettingSubscribeMessage, ""); err != nil {
 			log.Printf("SetSetting error: %v", err)
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка сохранения."))
+			setState(adminID, StateIdle)
+			safeSend(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка сохранения."))
 			return
 		}
 		setState(adminID, StateIdle)
-		ok := tgbotapi.NewMessage(chatID, "♻️ *Текст приветствия сброшен.*\nБудет использоваться текст по умолчанию.")
-		ok.ParseMode = "Markdown"
+		ok := tgbotapi.NewMessage(chatID,
+			"♻️ Текст приветствия сброшен.\nБудет использоваться текст по умолчанию.")
 		ok.ReplyMarkup = AdminRequiredSubsKeyboard()
-		bot.Send(ok)
+		safeSend(bot, ok)
 		return
 	}
 
 	if err := SetSetting(SettingSubscribeMessage, text); err != nil {
 		log.Printf("SetSetting error: %v", err)
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка сохранения."))
+		setState(adminID, StateIdle)
+		safeSend(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка сохранения."))
 		return
 	}
 	setState(adminID, StateIdle)
 
-	ok := tgbotapi.NewMessage(chatID, "✅ *Текст приветствия обновлён.*")
-	ok.ParseMode = "Markdown"
+	ok := tgbotapi.NewMessage(chatID, "✅ Текст приветствия обновлён.")
 	ok.ReplyMarkup = AdminRequiredSubsKeyboard()
-	bot.Send(ok)
+	safeSend(bot, ok)
 }
 
 // ResetSubscribeMessage resets the subscription message to default.
 func ResetSubscribeMessage(bot *tgbotapi.BotAPI, chatID int64) {
 	if err := SetSetting(SettingSubscribeMessage, ""); err != nil {
 		log.Printf("SetSetting error: %v", err)
-		bot.Send(tgbotapi.NewMessage(chatID, "❌ Ошибка сброса."))
+		safeSend(bot, tgbotapi.NewMessage(chatID, "❌ Ошибка сброса."))
 		return
 	}
-	msg := tgbotapi.NewMessage(chatID, "♻️ *Текст приветствия сброшен.*\nБудет использоваться текст по умолчанию.")
-	msg.ParseMode = "Markdown"
+	msg := tgbotapi.NewMessage(chatID,
+		"♻️ Текст приветствия сброшен.\nБудет использоваться текст по умолчанию.")
 	msg.ReplyMarkup = AdminRequiredSubsKeyboard()
-	bot.Send(msg)
+	safeSend(bot, msg)
 }
 
 // HandleRequiredChannelRemoveCallback removes a required channel by db id and refreshes list.
@@ -345,19 +365,20 @@ func HandleRequiredChannelRemoveCallback(bot *tgbotapi.BotAPI, callback *tgbotap
 	channels, _ := ListRequiredChannels()
 	if len(channels) == 0 {
 		edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID,
-			"📭 *Список каналов обязательной подписки пуст.*")
-		edit.ParseMode = "Markdown"
-		bot.Send(edit)
+			"📭 Список каналов обязательной подписки пуст.")
+		if _, err := bot.Send(edit); err != nil {
+			log.Printf("edit empty list failed: %v", err)
+		}
 	} else {
 		var sb strings.Builder
-		sb.WriteString("📋 *Каналы обязательной подписки*\n")
+		sb.WriteString("📋 Каналы обязательной подписки\n")
 		sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n\n")
 		for i, c := range channels {
 			title := c.Title
 			if title == "" {
 				title = "(без названия)"
 			}
-			sb.WriteString(fmt.Sprintf("`%d.` *%s*\n   ID: `%s`\n", i+1, title, c.ChatID))
+			sb.WriteString(fmt.Sprintf("%d. %s\n   ID: %s\n", i+1, title, c.ChatID))
 			if c.InviteLink != "" {
 				sb.WriteString(fmt.Sprintf("   🔗 %s\n", c.InviteLink))
 			}
@@ -368,8 +389,9 @@ func HandleRequiredChannelRemoveCallback(bot *tgbotapi.BotAPI, callback *tgbotap
 		kb := RequiredChannelRemoveKeyboard(channels)
 		edit := tgbotapi.NewEditMessageTextAndMarkup(chatID, callback.Message.MessageID,
 			sb.String(), kb)
-		edit.ParseMode = "Markdown"
-		bot.Send(edit)
+		if _, err := bot.Send(edit); err != nil {
+			log.Printf("edit list failed: %v", err)
+		}
 	}
 
 	answer := tgbotapi.NewCallback(callback.ID, "✅ Канал удалён")
