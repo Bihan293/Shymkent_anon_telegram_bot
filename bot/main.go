@@ -153,7 +153,7 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			HandleAddRequiredChannelInput(bot, message)
 			return
 		}
-		if state == StateAdminReqEditMsg {
+		if state == StateAdminReqChanEditMsg {
 			HandleEditSubscribeMessageInput(bot, message)
 			return
 		}
@@ -249,6 +249,7 @@ func handleAdminCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 func openAdminPanel(bot *tgbotapi.BotAPI, chatID int64) {
 	setState(adminID, StateIdle)
 	deleteBroadcastDraft()
+	setAdminMenu("panel")
 
 	text := "🛠 *Админ-панель*\n\n" +
 		"Выберите раздел:\n\n" +
@@ -258,6 +259,22 @@ func openAdminPanel(bot *tgbotapi.BotAPI, chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "Markdown"
 	msg.ReplyMarkup = AdminPanelKeyboard()
+	bot.Send(msg)
+}
+
+// returnToAdminMain — go back to the admin's main user-style keyboard (with send-anon, help, change-lang, admin-panel).
+func returnToAdminMain(bot *tgbotapi.BotAPI, chatID int64) {
+	setState(adminID, StateIdle)
+	deleteBroadcastDraft()
+	setAdminMenu("main")
+
+	lang := getUserLang(adminID)
+	if lang == "" {
+		lang = LangRU
+	}
+	msg := tgbotapi.NewMessage(chatID, t(lang, "welcome"))
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = AdminKeyboard()
 	bot.Send(msg)
 }
 
@@ -278,6 +295,7 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 	case BtnAdminBroadcast:
 		setState(adminID, StateIdle)
 		deleteBroadcastDraft()
+		setAdminMenu("broadcast")
 		msg := tgbotapi.NewMessage(chatID,
 			"📣 *Рассылка*\n\nВыберите цель рассылки:")
 		msg.ParseMode = "Markdown"
@@ -302,6 +320,7 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 		return true
 
 	case BtnAdminRequiredSubs:
+		setAdminMenu("reqsubs")
 		OpenRequiredSubsMenu(bot, chatID)
 		return true
 
@@ -322,17 +341,26 @@ func handleAdminPanelButton(bot *tgbotapi.BotAPI, message *tgbotapi.Message) boo
 		return true
 
 	case BtnAdminBack:
-		// Context-dependent back: cancel any draft and return to main admin panel
+		// Context-dependent back:
+		// • from admin panel main → return to user-style main menu
+		// • from sub-menus (broadcast, reqsubs) → return to admin panel
 		deleteBroadcastDraft()
 		setState(adminID, StateIdle)
-		openAdminPanel(bot, chatID)
+		switch getAdminMenu() {
+		case "panel":
+			returnToAdminMain(bot, chatID)
+		case "broadcast", "reqsubs":
+			openAdminPanel(bot, chatID)
+		default:
+			returnToAdminMain(bot, chatID)
+		}
 		return true
 
 	case BtnAdminCancel:
 		// Cancel any in-progress admin operation
 		state := getState(adminID)
 		if IsBroadcastState(state) || state == StateAdminReplyContent || state == StateAdminReplyConfirm ||
-			state == StateAdminReqChanAdd || state == StateAdminReqEditMsg {
+			state == StateAdminReqChanAdd || state == StateAdminReqChanEditMsg {
 			deleteBroadcastDraft()
 			deleteAdminReplyDraft()
 			setState(adminID, StateIdle)

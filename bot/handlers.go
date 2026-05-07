@@ -17,8 +17,21 @@ var (
 	userDrafts      = make(map[int64]*DraftMessage)
 	userCooldown    = make(map[int64]time.Time) // last successful send time
 	adminReplyDraft *AdminReplyDraft             // single admin reply draft
+	adminMenu       = "main"                     // tracks current admin menu: "main", "panel", "broadcast", "reqsubs"
 	mu              sync.Mutex
 )
+
+func setAdminMenu(menu string) {
+	mu.Lock()
+	defer mu.Unlock()
+	adminMenu = menu
+}
+
+func getAdminMenu() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return adminMenu
+}
 
 const cooldownDuration = 5 * time.Minute
 
@@ -317,7 +330,11 @@ func HandleHelp(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	text := t(lang, "help")
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
 	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = UserKeyboard(lang)
+	if userID == adminID {
+		msg.ReplyMarkup = AdminKeyboard()
+	} else {
+		msg.ReplyMarkup = UserKeyboard(lang)
+	}
 	bot.Send(msg)
 }
 

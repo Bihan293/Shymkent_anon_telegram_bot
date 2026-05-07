@@ -56,7 +56,7 @@ func t(lang, key string) string {
 var translations = map[string]map[string]string{
 	LangRU: {
 		// ── Buttons ──────────────────────────────────────────────────────
-		"btn_send_anon":    "📨 Отправить анонимку",
+		"btn_send_anon":    "📨 Оставить анонимку",
 		"btn_help":         "❓ Помощь",
 		"btn_change_lang":  "🌐 Сменить язык",
 		"btn_cancel":       "❌ Отменить",
@@ -124,7 +124,7 @@ var translations = map[string]map[string]string{
 
 	LangKZ: {
 		// ── Buttons ──────────────────────────────────────────────────────
-		"btn_send_anon":    "📨 Анонимді жіберу",
+		"btn_send_anon":    "📨 Анонимді қалдыру",
 		"btn_help":         "❓ Көмек",
 		"btn_change_lang":  "🌐 Тілді ауыстыру",
 		"btn_cancel":       "❌ Бас тарту",
